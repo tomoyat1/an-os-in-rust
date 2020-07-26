@@ -7,10 +7,10 @@
 - Latest nightly Rust toolchain.
     - Be sure to add `rust-src` component, as it will be needed to build rust core library for `x86_64-unknown-uefi`.
     - Steps:
-```console
-% rustup default nightly  # This sets default toolchain to nightly
-% rustup component add rust-src  # This adds the `rust-src` component for nightly toolchain
-```
+      ```console
+      % rustup default nightly  # This sets default toolchain to nightly
+      % rustup component add rust-src  # This adds the `rust-src` component for nightly toolchain
+      ```
 - An UEFI compatible machine (Tested on Hyper-V VM)
 
 ## Building
