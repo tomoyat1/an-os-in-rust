@@ -1,9 +1,11 @@
 [package]
-name = "aosir"
+name = "an-operating-system-in-rust"
 version = "0.1.0"
 authors = ["tomoyat1 <t@tomoyat1.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+compiler_builtins = { git = "https://github.com/rust-lang/compiler-builtins" }
+log = { version = "0.4", default-features = false }
+uefi = "0.4.7"
+uefi-services = "0.2.4"
