@@ -1,5 +1,5 @@
 # An Operating System in Rust
-> Doesn't do anythin useful.
+> Doesn't do anything useful.
 
 ## Building
 ```console
