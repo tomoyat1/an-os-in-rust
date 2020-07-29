@@ -4,11 +4,18 @@
 name = "an-operating-system-in-rust"
 version = "0.1.0"
 dependencies = [
+ "array-macro",
  "compiler_builtins",
  "log",
  "uefi",
  "uefi-services",
 ]
+
+[[package]]
+name = "array-macro"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06e97b4e522f9e55523001238ac59d13a8603af57f69980de5d8de4bbbe8ada6"
 
 [[package]]
 name = "bit_field"

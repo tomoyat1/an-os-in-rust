@@ -9,3 +9,4 @@ compiler_builtins = { git = "https://github.com/rust-lang/compiler-builtins" }
 log = { version = "0.4", default-features = false }
 uefi = "0.4.7"
 uefi-services = "0.2.4"
+array-macro = "1.0.5"
