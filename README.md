@@ -14,7 +14,9 @@
 - An UEFI compatible machine (Tested on Hyper-V VM)
 
 ## Building
+### Bootloader
 ```console
+% cd bootloader
 % make
 ```
 
