@@ -9,7 +9,7 @@ use log::info;
 
 const SQUARE_SIZE: usize = 50;
 
-mod fonts;
+pub mod fonts;
 use crate::framebuffer::fonts::{FONT_HEIGHT, FONT_WIDTH};
 
 pub struct Framebuffer<'boot> {

@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::str::{Lines, SplitWhitespace};
 use log::info;
 
-static TERMINUS_U18N: &'static str = include_str!("./ter-u18n.bdf");
+static TERMINUS_U18N: &'static str = include_str!("ter-u18n.bdf");
 
 pub const FONT_WIDTH: usize = 16;
 pub const FONT_HEIGHT: usize = 18;
