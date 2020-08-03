@@ -21,6 +21,7 @@
       "-Tlink.ld"
     ]
   },
+  "relocation-model": false,
   "singlethread": true,
   "stack-probes": true,
   "target-c-int-width": "32",
