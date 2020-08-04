@@ -1,10 +1,10 @@
 .code32
 .section .bss, "aw", @nobits
-.align 4096
+.align 8192
 boot_page_directory:
-    .skip 4096
+    .skip 8192
 boot_page_table_1:
-    .skip 4096
+    .skip 8192
 
 .section .bootstrap_stack, "aw", @nobits
     stack_bottom:
@@ -12,9 +12,9 @@ boot_page_table_1:
     stack_top:
 
 .code64
-.section .low.text
+.section .low.text, "ax"
 .global _low_start
-.type _start @function
+.type _low_start, @function
 _low_start:
     movl $(boot_page_table_1 - 0xFFFFFFFF80000000), %edi
     movl $0, %esi

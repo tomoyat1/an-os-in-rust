@@ -1,7 +1,5 @@
-ENTRY(start);
+ENTRY(_low_start);
 OUTPUT_FORMAT("elf64-x86-64");
-
-EXTERN(_low_start);
 
 SECTIONS
 {
@@ -10,22 +8,19 @@ SECTIONS
 		KEEP( *(.low.text))
 	}
 
-	. = 0xFFFFFFFF80100000;
+	. = 0xFFFFFFFF80200000;
 	_kernel_start = .;
 
-	.text ALIGN (4K) : AT (ADDR (.text) - 0xFFFFFFFF80000000) {
+	.text ALIGN (8K) : AT (ADDR (.text) - 0xFFFFFFFF80000000) {
 		*(.text)
-		*(.text.*)
 	}
-	.data ALIGN(4K) : AT (ADDR (.data) - 0xFFFFFFFF80000000) {
+	.data ALIGN(8K) : AT (ADDR (.data) - 0xFFFFFFFF80000000) {
 		*(.data)
-		*(.data.*)
 	}
-	.rodata ALIGN(4K) : AT (ADDR (.rodata) - 0xFFFFFFFF80000000) {
+	.rodata ALIGN(8K) : AT (ADDR (.rodata) - 0xFFFFFFFF80000000) {
 	    *(.rodata)
-	    *(.rodata.*)
 	}
-	.bss ALIGN(4K) : AT (ADDR (.bss) - 0xFFFFFFFF80000000) {
+	.bss ALIGN(8K) : AT (ADDR (.bss) - 0xFFFFFFFF80000000) {
 		*(COMMON)
 		*(.bss)
 		*(.bootstrap_stack)
