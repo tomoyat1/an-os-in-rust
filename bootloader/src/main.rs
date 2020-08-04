@@ -3,9 +3,9 @@
 #![feature(abi_efiapi)]
 #![feature(alloc)]
 extern crate alloc;
-extern crate compiler_builtins;
 extern crate uefi;
 extern crate uefi_services;
+extern crate rlibc;
 
 use crate::framebuffer::Framebuffer;
 use alloc::vec::*;
