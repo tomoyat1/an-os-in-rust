@@ -2,8 +2,6 @@
 > Doesn't do anything useful.
 
 ## Requirements
-- [cargo-xbuild](https://github.com/rust-osdev/cargo-xbuild)
-    - This project is not compatible with builtin cargo `build-std` feature yet.
 - Latest nightly Rust toolchain.
     - Be sure to add `rust-src` component, as it will be needed to build rust core library for `x86_64-unknown-uefi`.
     - Steps:

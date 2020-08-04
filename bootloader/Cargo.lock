@@ -29,8 +29,8 @@ name = "bootloader"
 version = "0.1.0"
 dependencies = [
  "array-macro",
- "compiler_builtins",
  "log",
+ "rlibc",
  "uefi",
  "uefi-services",
 ]
@@ -40,11 +40,6 @@ name = "cfg-if"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
-
-[[package]]
-name = "compiler_builtins"
-version = "0.1.32"
-source = "git+https://github.com/rust-lang/compiler-builtins#f3846bc05da87b8a71cd1a5a6ff9d980f46b2d0f"
 
 [[package]]
 name = "log"
@@ -72,6 +67,12 @@ checksum = "aa563d17ecb180e500da1cfd2b028310ac758de548efdd203e18f283af693f37"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "rlibc"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc874b127765f014d792f16763a81245ab80500e2ad921ed4ee9e82481ee08fe"
 
 [[package]]
 name = "syn"
