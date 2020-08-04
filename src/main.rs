@@ -4,9 +4,9 @@
 #![feature(alloc)]
 #![feature(asm)]
 extern crate alloc;
-extern crate compiler_builtins;
 extern crate uefi;
 extern crate uefi_services;
+extern crate rlibc;
 
 use alloc::vec::*;
 use core::fmt::Write;
