@@ -8,7 +8,7 @@ SECTIONS
 		KEEP( *(.low.text))
 	}
 
-	. = 0xFFFFFFFF80200000;
+	. += 0xFFFFFFFF80000000;
 	_kernel_start = .;
 
 	.text ALIGN (8K) : AT (ADDR (.text) - 0xFFFFFFFF80000000) {
