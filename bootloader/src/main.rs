@@ -18,6 +18,7 @@ use uefi::table::boot::{EventType, SearchType, TimerTrigger, Tpl};
 pub mod framebuffer;
 pub mod loader;
 use crate::loader::load_file;
+use crate::loader::elf::load_elf;
 
 #[entry]
 fn efi_main(_handle: Handle, system_table: SystemTable<Boot>) -> Status {
@@ -32,9 +33,10 @@ fn efi_main(_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
     // Proceed to bootstrapping the kernel.
     match load_file(&system_table) {
-        Ok(s) => {
-            writeln!(fb, "kernel loaded: {}", s);
-        },
+        Ok(file) => {
+            writeln!(fb, "kernel loaded: {}", file.len());
+            load_elf(&file, fb);
+        }
         Err(e) => {
             writeln!(fb, "kernel load failed: {:?}", e);
         }

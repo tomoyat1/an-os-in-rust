@@ -8,7 +8,7 @@ use uefi::proto::media::fs::SimpleFileSystem;
 
 pub mod elf;
 
-pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<usize, String>{
+pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<Vec<u8>, String>{
     let bs = system_table.boot_services();
     let fs = bs.locate_protocol::<SimpleFileSystem>()
         .map_err(|e| String::from(format!("Simple File System Protocol support is required: {:?}", e.status())))?
@@ -47,7 +47,7 @@ pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<usize
                 let read_size = f.read(&mut buf)
                     .map_err(|e| String::from(format!("failed to read kernel: {:?}", e.status())))?
                     .expect("warnings when reading kernel");
-                Ok(read_size)
+                Ok(buf)
             } else {
                 Err(format!("unexpected error in obtaining file info: {:?}", size.status()))
             }

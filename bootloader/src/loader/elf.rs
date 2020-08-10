@@ -1,8 +1,16 @@
+use alloc::format;
+use alloc::string::String;
+use core::mem;
+
+use crate::framebuffer::Framebuffer;
+use core::fmt::Write;
+use core::str::from_utf8;
+
 const EI_NIDENT: usize = 16;
 
 #[repr(C)]
 struct ElfHeader {
-    e_ident: [char; EI_NIDENT],
+    e_ident: [u8; EI_NIDENT],
     e_type: u16,
     e_machine: u16,
     e_version: u32,
@@ -18,6 +26,7 @@ struct ElfHeader {
     e_shstrndx: u16,
 }
 
+#[repr(C)]
 struct ProgramHeader {
     p_type: u32,
     p_flags: u32,
@@ -27,4 +36,15 @@ struct ProgramHeader {
     p_filesz: u64,
     p_memsz: u64,
     p_aligh: u64,
+}
+
+pub fn load_elf(elf_file: &[u8], fb: &mut Framebuffer) -> core::result::Result<(), String> {
+    let elf_header: *const u8 = &elf_file[0];
+    let elf_header = unsafe { &*(elf_header as *const ElfHeader)};
+    let magic = from_utf8(&elf_header.e_ident[1..4])
+        .map_err(|e| format!("failed to read magic: {:?}", e))?;
+    writeln!(fb, "e_ident: {}", magic);
+
+    // In the end, it doesn't even matter.
+    Ok(())
 }
