@@ -11,19 +11,19 @@ pub mod elf;
 pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<usize, String>{
     let bs = system_table.boot_services();
     let fs = bs.locate_protocol::<SimpleFileSystem>()
-        .expect("Simple File System Protocol support is required!");
-    let fs = fs.expect("warnings occurred when opening SFS");
+        .map_err(|e| String::from(format!("Simple File System Protocol support is required: {:?}", e.status())))?
+        .expect("warnings occurred when opening SFS");
     let fs = unsafe { &mut *fs.get()};
     let dir = &mut fs.open_volume()
-        .expect("failed to open root directory")
+        .map_err(|e| String::from(format!("failed to open root directory: {:?}", e.status())))?
         .expect("warnings occurred when opening directory");
     let kernel_file = dir.open("aosir", FileMode::Read, FileAttribute::READ_ONLY)
-        .expect("failed to obtain file handle")
+        .map_err(|e| String::from(format!("failed to obtain file handle: {:?}", e.status())))?
         .expect("warnings occurred when obtaining file handle");
-    let kernel_file_typed = kernel_file.into_type()
-        .expect("failed to get file type")
+    let kernel_file = kernel_file.into_type()
+        .map_err(|e| String::from(format!("failed to get file type: {:?}", e.status())))?
         .expect("warnings occurred when getting file type");
-    match kernel_file_typed {
+    match kernel_file {
         FileType::Dir(_) => {
             Err(String::from("directory found instead of kernel binary at /aosir"))
         },
@@ -37,7 +37,7 @@ pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<usize
             if let (Some(size), Status::BUFFER_TOO_SMALL) = (size.data(), size.status()) {
                 info_buf.resize(*size, 0);
                 let info = f.get_info::<FileInfo>(&mut info_buf)
-                    .expect("failed to get file info")
+                    .map_err(|e| String::from(format!("failed to get file info: {:?}", e.status())))?
                     .expect("warnings when getting file info");
                 info.file_size();
                 let mut buf: Vec<u8> = Vec::with_capacity(info.file_size() as usize);
@@ -45,7 +45,7 @@ pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<usize
                     buf.set_len(info.file_size() as usize);
                 }
                 let read_size = f.read(&mut buf)
-                    .expect("failed to read kernel")
+                    .map_err(|e| String::from(format!("failed to read kernel: {:?}", e.status())))?
                     .expect("warnings when reading kernel");
                 Ok(read_size)
             } else {
