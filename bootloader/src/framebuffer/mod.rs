@@ -12,6 +12,7 @@ const SQUARE_SIZE: usize = 50;
 mod fonts;
 use crate::framebuffer::fonts::{FONT_HEIGHT, FONT_WIDTH};
 
+// TODO: make this generic in the sense that it can either use gop or the raw framebuffer behind it.
 pub struct Framebuffer<'boot> {
     gop: &'boot mut GraphicsOutput<'boot>,
 
@@ -67,7 +68,10 @@ impl<'boot> Framebuffer<'boot> {
         const BUF_SIZE: usize = FONT_HEIGHT * FONT_WIDTH;
         if c == '\n' {
             self.newline();
-            return
+            return;
+        }
+        if self.cursor_x >= self.n_col {
+            self.newline();
         }
         let bitmap = self.font.glyphs[c as usize - 32].bitmap;
         let mut buffer = Vec::<BltPixel>::with_capacity(BUF_SIZE);
@@ -105,7 +109,7 @@ impl<'boot> core::fmt::Write for Framebuffer<'boot> {
     fn write_str(&mut self, s: &str) -> Result<(), core::fmt::Error> {
         for c in s.chars() {
             self.write_char_impl(c);
-        };
+        }
         Ok(())
     }
 }

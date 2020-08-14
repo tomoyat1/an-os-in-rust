@@ -107,13 +107,13 @@ pub fn parse_bdf() -> Terminus16x18Font {
                     stack.pop(); // STARTCHAR
                     continue 'lines;
                 }
-                "ENDFONT" => {continue 'lines},
+                "ENDFONT" => continue 'lines,
                 v => match *stack.last().unwrap_or(&Token::EMPTY) {
                     Token::ENCODING => {
                         let parsed = v.parse::<u8>();
                         match parsed {
                             Ok(enc) => {
-                                if enc > 127 || enc == 0{
+                                if enc > 127 || enc == 0 {
                                     stack.pop();
                                     stack.push(Token::UNUSED);
                                     continue 'lines;
@@ -122,14 +122,14 @@ pub fn parse_bdf() -> Terminus16x18Font {
                                 }
                                 glyph.codepoint = enc;
                                 stack.pop();
-                            },
+                            }
                             Err(_) => {
                                 stack.pop();
                                 stack.push(Token::UNUSED);
-                            },
+                            }
                         }
                         continue 'lines;
-                    },
+                    }
                     Token::UNUSED => {
                         continue 'lines;
                     }

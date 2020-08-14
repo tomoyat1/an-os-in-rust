@@ -4,6 +4,7 @@ use core::mem;
 
 use crate::framebuffer::Framebuffer;
 use core::fmt::Write;
+use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use core::str::from_utf8;
 
 const EI_NIDENT: usize = 16;
@@ -14,12 +15,12 @@ struct ElfHeader {
     e_type: u16,
     e_machine: u16,
     e_version: u32,
-    e_entry: u64,
-    e_phoff: u64,
-    e_shoff: u64, // Section header table's file offset in bytes.
+    e_entry: usize,
+    e_phoff: usize,
+    e_shoff: usize, // Section header table's file offset in bytes.
     e_flags: u32,
     e_ehsize: u16,
-    e_phentsize:  u16,
+    e_phentsize: u16,
     e_phnum: u16,
     e_shentsize: u16, // Number of entries in section header table.
     e_shnum: u16,
@@ -30,21 +31,51 @@ struct ElfHeader {
 struct ProgramHeader {
     p_type: u32,
     p_flags: u32,
-    p_offset: u64,
-    p_vaddr: u64,
-    p_paddr: u64,
-    p_filesz: u64,
-    p_memsz: u64,
-    p_aligh: u64,
+    p_offset: usize,
+    p_vaddr: usize,
+    p_paddr: usize,
+    p_filesz: usize,
+    p_memsz: usize,
+    p_aligh: usize,
 }
 
-pub fn load_elf(elf_file: &[u8], fb: &mut Framebuffer) -> core::result::Result<(), String> {
+pub fn load_elf(
+    elf_file: &[u8],
+    fb: &mut Framebuffer,
+) -> core::result::Result<unsafe extern "C" fn(), String> {
     let elf_header: *const u8 = &elf_file[0];
-    let elf_header = unsafe { &*(elf_header as *const ElfHeader)};
+    let elf_header = unsafe { &*(elf_header as *const ElfHeader) };
     let magic = from_utf8(&elf_header.e_ident[1..4])
         .map_err(|e| format!("failed to read magic: {:?}", e))?;
-    writeln!(fb, "e_ident: {}", magic);
+    assert_eq!(magic, "ELF");
 
-    // In the end, it doesn't even matter.
-    Ok(())
+    let program_header: *const u8 = &elf_file[elf_header.e_phoff];
+    let program_headers = unsafe {
+        let head = &*(program_header as *const ProgramHeader);
+        &*slice_from_raw_parts::<ProgramHeader>(head, elf_header.e_phnum as usize)
+    };
+    assert_eq!(
+        mem::size_of::<ProgramHeader>(),
+        elf_header.e_phentsize as usize
+    );
+
+    // Load segments
+    for (i, ph) in program_headers.iter().enumerate() {
+        if ph.p_paddr == 0 {
+            continue;
+        }
+        write!(fb, "loading segment: {} ;", i);
+        let paddr: *mut u8 = ph.p_paddr as *mut u8;
+        let buf = unsafe { &mut *slice_from_raw_parts_mut::<u8>(paddr, ph.p_memsz) };
+        for b in buf.iter_mut() {
+            *b = 0
+        }
+        write!(fb, "buf addr: {:p}, len: {:x}\n", buf, buf.len());
+        buf[0..ph.p_filesz].copy_from_slice(&elf_file[ph.p_offset..ph.p_offset + ph.p_filesz])
+    }
+
+    // use transmute() to forcefully cast e_entry to a fn()
+    let void_ptr = elf_header.e_entry as *const ();
+    let fn_ptr: unsafe extern "C" fn() = unsafe { mem::transmute(void_ptr) };
+    Ok(fn_ptr)
 }
