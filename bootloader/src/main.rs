@@ -77,53 +77,47 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
         }
     };
 
-    set_entrypoint_page_executable(entry_point as usize, fb);
-    // Set page at 0x00100000 executable.
-    // It is currently BOOT_SERIVCES_CODE, which is likely not executable.
-    // - Get page directory addr from CR0
-    // - Follow 4 layer page table to page
-    // - call system_table.runtime_services().set_virtual_address_map()
-    // - call entry_point() (jump to loaded kernel .low.text)
+    // set_entrypoint_page_executable(entry_point as usize, fb);
 
-    // probe segment registers
-    let mut new_gdt: Vec<u64> = Vec::with_capacity(32);
-    unsafe { new_gdt.set_len(32) }
-
-    let mut gdtr = Gdtr { base: (&new_gdt as *const Vec<u64>) as usize, limit: 32 };
-    let mut gdtr2 = Gdtr { base: 0, limit: 0 };
-    let mut cs: usize = 0;
-    new_gdt[1] = 0x00209a00 << 32; // second 4 byte word; first word is 0 in x64
-    new_gdt[2] = 0x00009200 << 32; // second 4 byte word; first word is 0 in x64
-    unsafe {
-        asm!(
-            ".code64",
-            // ".section .text",
-            // "lgdt [{gdtr_addr}]",
-            // "jmp fword ptr [cs_contents]",
-            // "reload_cs:",
-            // "mov {r},  0x10",
-            // "mov ds, {r}",
-            // "mov es, {r}",
-            // "mov fs, {r}",
-            "sgdt [{gdtr_addr2}]",
-            "mov {cs}, cs",
-            // ".section .data",
-            // "cs_contents:",
-            //  ".quad reload_cs",
-            //  ".word 0x10",
-            // gdtr_addr = in(reg) &gdtr as *const Gdtr,
-            gdtr_addr2 = in(reg) &gdtr2 as *const Gdtr,
-            // r = out(reg) _,
-            cs = out(reg) cs,
-        )
-    }
-    writeln!(fb, "GDT base: {:x}, limit: {:x}", gdtr2.base, gdtr2.limit);
-    writeln!(fb, "CS: {:x}", cs);
-    let gdt = slice_from_raw_parts(gdtr2.base as *const u64, (gdtr2.limit / 0x8) as usize);
-    let mut gdt = unsafe { &*gdt };
-    for i in 0..(gdtr2.limit / 8) {
-        writeln!(fb, "segment desc. {}: {:x}", i, gdt[(i / 8) as usize]);
-    }
+    // // probe segment registers
+    // let mut new_gdt: Vec<u64> = Vec::with_capacity(32);
+    // unsafe { new_gdt.set_len(32) }
+    //
+    // let mut gdtr = Gdtr { base: (&new_gdt as *const Vec<u64>) as usize, limit: 32 };
+    // let mut gdtr2 = Gdtr { base: 0, limit: 0 };
+    // let mut cs: usize = 0;
+    // new_gdt[1] = 0x00209a00 << 32; // second 4 byte word; first word is 0 in x64
+    // new_gdt[2] = 0x00009200 << 32; // second 4 byte word; first word is 0 in x64
+    // unsafe {
+    //     asm!(
+    //         ".code64",
+    //         // ".section .text",
+    //         // "lgdt [{gdtr_addr}]",
+    //         // "jmp fword ptr [cs_contents]",
+    //         // "reload_cs:",
+    //         // "mov {r},  0x10",
+    //         // "mov ds, {r}",
+    //         // "mov es, {r}",
+    //         // "mov fs, {r}",
+    //         "sgdt [{gdtr_addr2}]",
+    //         "mov {cs}, cs",
+    //         // ".section .data",
+    //         // "cs_contents:",
+    //         //  ".quad reload_cs",
+    //         //  ".word 0x10",
+    //         // gdtr_addr = in(reg) &gdtr as *const Gdtr,
+    //         gdtr_addr2 = in(reg) &gdtr2 as *const Gdtr,
+    //         // r = out(reg) _,
+    //         cs = out(reg) cs,
+    //     )
+    // }
+    // writeln!(fb, "GDT base: {:x}, limit: {:x}", gdtr2.base, gdtr2.limit);
+    // writeln!(fb, "CS: {:x}", cs);
+    // let gdt = slice_from_raw_parts(gdtr2.base as *const u64, (gdtr2.limit / 0x8) as usize);
+    // let mut gdt = unsafe { &*gdt };
+    // for i in 0..(gdtr2.limit / 8) {
+    //     writeln!(fb, "segment desc. {}: {:x}", i, gdt[(i / 8) as usize]);
+    // }
 
     // set up the most basic IDT here
     // let mut idt = Vec::<u128>::with_capacity(16);
