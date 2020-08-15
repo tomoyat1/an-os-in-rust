@@ -15,9 +15,9 @@ boot_pt:
     .skip 0x1000
 
 .section .bootstrap_stack, "aw", @nobits
-stack_bottom:
+boot_stack_bottom:
     .skip 16384
-stack_top:
+boot_stack_top:
 
 .code64
 .section .low.text, "ax"
@@ -99,7 +99,7 @@ _low_start:
 
 .section .text
 4:
-    mov $stack_top, %rsp
+    mov $boot_stack_top, %rsp
 
     # Call rust kernel entrypoint.
     # First parameter for start(gop_buf: *const [u8]); should be GOP buffer address.

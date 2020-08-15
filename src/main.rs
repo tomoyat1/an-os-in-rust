@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(linkage)]
+#![feature(asm)]
 
 extern crate rlibc;
 
@@ -18,6 +19,12 @@ use arch::x86_64::mm::init_mm;
 ///               The framebuffer is obtained through using the UEFI GOP protocol.
 pub unsafe extern "C" fn start(gop_buf: *const [u8]) {
     init_mm();
+
+    let stack_top: *mut u8 = 0xFFFFFFFFCFFFFFFF as *mut u8;
+    unsafe {
+        let stack_top = &mut *stack_top;
+        *stack_top = 0xde;
+    }
 
     // Start scheduler
 
