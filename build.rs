@@ -4,7 +4,7 @@ use std::env;
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
 
-    Command::new("gcc").args(&["src/boot/boot.s", "-c", "-mcmodel=large", "-o"])
+    Command::new("gcc").args(&["src/arch/x86_64/boot.s", "-c", "-mcmodel=large", "-o"])
         .arg(&format!("{}/libboot.a", out_dir))
         .status().unwrap();
 

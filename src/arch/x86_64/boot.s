@@ -1,19 +1,23 @@
 .code32
 .section .bss, "aw", @nobits
 .align 4096
+.global boot_pml4
 boot_pml4:
     .skip 0x1000
+.global boot_pdpt
 boot_pdpt:
     .skip 0x1000
+.global boot_pdt
 boot_pdt:
     .skip 0x1000
+.global boot_pt
 boot_pt:
     .skip 0x1000
 
 .section .bootstrap_stack, "aw", @nobits
-    stack_bottom:
-.skip 16384
-    stack_top:
+stack_bottom:
+    .skip 16384
+stack_top:
 
 .code64
 .section .low.text, "ax"
@@ -95,12 +99,9 @@ _low_start:
 
 .section .text
 4:
-    xorl %edx, %edx
-    movl $0xdeadbeef, %edx
-    cli
-    hlt
-    # movl $0, boot_page_directory + 0
     mov $stack_top, %rsp
 
-    # call rust kernel entrypoint
+    # Call rust kernel entrypoint.
+    # First parameter for start(gop_buf: *const [u8]); should be GOP buffer address.
+    movq $0xdeadbeef, %rdi
     call start
