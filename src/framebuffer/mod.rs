@@ -69,6 +69,9 @@ impl<'boot> Framebuffer<'boot> {
             self.newline();
             return
         }
+        if self.cursor_x >= self.n_col {
+            self.newline();
+        }
         let bitmap = self.font.glyphs[c as usize - 32].bitmap;
         let mut buffer = Vec::<BltPixel>::with_capacity(BUF_SIZE);
         for row in bitmap.iter() {
