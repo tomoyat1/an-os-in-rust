@@ -11,10 +11,13 @@ const SQUARE_SIZE: usize = 50;
 
 mod fonts;
 use crate::framebuffer::fonts::{FONT_HEIGHT, FONT_WIDTH};
+use crate::boot_types;
+use array_macro::__core::ptr::slice_from_raw_parts_mut;
+use bootloader::boot_types::RawFramebuffer;
 
 // TODO: make this generic in the sense that it can either use gop or the raw framebuffer behind it.
-pub struct Framebuffer<'boot> {
-    gop: &'boot mut GraphicsOutput<'boot>,
+pub struct Framebuffer<'gop> {
+    gop: &'gop mut GraphicsOutput<'gop>,
 
     pixel_width: usize,
     pixel_height: usize,
@@ -28,7 +31,7 @@ pub struct Framebuffer<'boot> {
     font: fonts::Terminus16x18Font,
 }
 
-impl<'boot> Framebuffer<'boot> {
+impl<'gop> Framebuffer<'gop> {
     pub fn new(system_table: &SystemTable<Boot>) -> Framebuffer {
         let bs = system_table.boot_services();
         let gop = bs
@@ -103,9 +106,27 @@ impl<'boot> Framebuffer<'boot> {
         }
         // TODO: implement scrolling
     }
+
+    /// Converts to RawFramebuffer, for passing to the kernel.
+    /// This is required since we cannot depend on GOP at runtime.
+    pub fn raw_framebuffer(&mut self) -> boot_types::RawFramebuffer {
+        let mut raw_fb = self.gop.frame_buffer();
+        let base = raw_fb.as_mut_ptr();
+        let size = raw_fb.size();
+        let mode_info = self.gop.current_mode_info();
+        let (hr, vr) = mode_info.resolution();
+        boot_types::RawFramebuffer{
+            framebuffer_base: base,
+            framebuffer_size: size,
+            horizontal_resolution: hr,
+            vertical_resolution: vr,
+            pixels_per_scan_line: mode_info.stride(),
+            pixel_format: mode_info.pixel_format(),
+        }
+    }
 }
 
-impl<'boot> core::fmt::Write for Framebuffer<'boot> {
+impl<'gop> core::fmt::Write for Framebuffer<'gop> {
     fn write_str(&mut self, s: &str) -> Result<(), core::fmt::Error> {
         for c in s.chars() {
             self.write_char_impl(c);

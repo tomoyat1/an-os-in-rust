@@ -1,30 +1,32 @@
+
 #![no_std]
 #![no_main]
 #![feature(linkage)]
 #![feature(asm)]
 
 extern crate rlibc;
+extern crate bootloader;
 
 use core::panic::PanicInfo;
 
 mod arch;
+use arch::x86_64::mm::{init_mm, KERNEL_BASE};
 
-use arch::x86_64::mm::init_mm;
+mod boot;
 
 #[no_mangle]
 #[linkage = "external"]
 /// start() is the entry point for kernel code.
 /// # Arguments
-/// * `gop_buf` - The address of the framebuffer passed into the kernel by the bootloader.
-///               The framebuffer is obtained through using the UEFI GOP protocol.
-pub unsafe extern "C" fn start(gop_buf: *const [u8]) {
-    init_mm();
+/// * `boot_data` - The address of the BootData struct provided from the bootloader.
+pub unsafe extern "C" fn start(boot_data: *mut bootloader::boot_types::BootData) {
+    let foo = 1 + 1;
+    let boot_data = boot::BootData::relocate(&mut *boot_data, KERNEL_BASE);
+    init_mm(boot_data.memory_map); // TODO: error handling
 
-    let stack_top: *mut u8 = 0xFFFFFFFFCFFFFFFF as *mut u8;
-    unsafe {
-        let stack_top = &mut *stack_top;
-        *stack_top = 0xde;
-    }
+    // let stack_top: *mut u8 = 0xffffffffcfffffff as *mut u8;
+    // let stack_top = &mut *stack_top;
+    // *stack_top = 0xde;
 
     // Start scheduler
 

@@ -13,6 +13,7 @@ boot_pdt:
 .global boot_pt
 boot_pt:
     .skip 0x1000
+heap_bottom:
 
 .section .bootstrap_stack, "aw", @nobits
 boot_stack_bottom:
@@ -24,6 +25,7 @@ boot_stack_top:
 .global _low_start
 .type _low_start, @function
 _low_start:
+    mov %rcx, %rdi
     cli
     # identity-map 0x100000
     # pml4
@@ -102,6 +104,7 @@ _low_start:
     mov $boot_stack_top, %rsp
 
     # Call rust kernel entrypoint.
-    # First parameter for start(gop_buf: *const [u8]); should be GOP buffer address.
-    movq $0xdeadbeef, %rdi
+    # First parameter for start(boot_data: *const bootloader::boot_types::BootData); should be address to BootData struct.
+    # This was conveniently passed as first argument of _low_start by the bootloader.
+    addq $0xFFFFFFFF80000000, %rdi
     call start

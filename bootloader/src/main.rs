@@ -11,14 +11,18 @@ extern crate uefi_services;
 use crate::framebuffer::Framebuffer;
 use alloc::vec::*;
 use core::fmt::Write;
+use core::ptr;
 
 use log::info;
 use uefi::prelude::*;
-use uefi::table::boot::{EventType, SearchType, TimerTrigger, Tpl};
+use uefi::table::{Runtime};
+use uefi::table::boot;
+use uefi::table::boot::{EventType, SearchType, TimerTrigger, Tpl, MemoryDescriptor};
 use uefi::proto::loaded_image::{LoadedImage};
 
 pub mod framebuffer;
 pub mod loader;
+pub mod boot_types;
 use crate::loader::elf::load_elf;
 use crate::loader::load_file;
 use core::mem;
@@ -45,7 +49,7 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let fb = &mut Framebuffer::new(&system_table);
     fb.init().expect("failed to initialize framebuffer");
     system_table.boot_services().stall(1000000);
-    writeln!(fb, "Hello, World!\nHello, World again!");
+    writeln!(fb, "Loading kernel...");
 
     // Proceed to bootstrapping the kernel.
     let file = match load_file(&system_table) {
@@ -59,20 +63,24 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
         }
     };
 
-    // let len = 0x10;
-    // let mut mmap = Vec::<u8>::with_capacity(len);
-    // unsafe {
-    //     mmap.set_len(len)
-    // }
+    let raw_fb = fb.raw_framebuffer();
+
+    let len = system_table.boot_services().memory_map_size();
+    let mut mmap = Vec::<u8>::with_capacity(len);
+    unsafe {
+        mmap.set_len(len)
+    }
     // TODO: exit_boot_services() depends on having 2 implementations of Framebuffer for boot and
     //       runtime, because system_table will be consumed in this call.
     //       We cannot use the old fb beyond this point.
-    // system_table.exit_boot_services(handle, mmap.as_mut_slice());
+    let (system_table, mmap_iter) = system_table.exit_boot_services(handle, mmap.as_mut_slice())
+        .expect("failed to exit boot services")
+        .expect("warnings when exiting boot services");
+    let system_table = &system_table as *const SystemTable<Runtime>;
 
-    let entry_point = match load_elf(&file, fb) {
+    let entry_point = match load_elf(&file) {
         Ok(ep) => ep,
         Err(e) => {
-            writeln!(fb, "kernel load failed: {:?}", e);
             return uefi::Status::ABORTED;
         }
     };
@@ -131,7 +139,34 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     // let flags: u128 = 0x0
     //
 
-    unsafe { entry_point() };
+    let mut mmap = Vec::new();
+    let d = MemoryDescriptor::default();
+    // mmap.push(MemoryDescriptor::default());
+    // let mut head: u64 = 0xffffffff80000000;
+    // for entry in mmap_iter {
+    //     let mut ve = MemoryDescriptor::default();
+    //     ve.ty = entry.ty;
+    //     ve.phys_start = entry.phys_start;
+    //     ve.page_count = entry.page_count;
+    //     ve.att = entry.att;
+    //     head = head - (ve.page_count * 0x1000);
+    //     ve.virt_start = head;
+    //     mmap.push(*entry) ;
+    // }
+
+    // system_table.runtime_services().set_virtual_address_map();
+
+    let boot_data = 0x400000 as *mut boot_types::BootData;
+
+    let boot_data = unsafe {
+        ptr::write(boot_data, boot_types::BootData{
+            memory_map: &mmap,
+            framebuffer: raw_fb,
+            system_table,
+        });
+        &mut *boot_data
+    };
+    unsafe { entry_point(boot_data) };
     loop{}
 }
 

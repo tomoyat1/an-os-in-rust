@@ -3,6 +3,7 @@ use alloc::string::String;
 use core::mem;
 
 use crate::framebuffer::Framebuffer;
+use crate::boot_types;
 use core::fmt::Write;
 use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use core::str::from_utf8;
@@ -41,8 +42,7 @@ struct ProgramHeader {
 
 pub fn load_elf(
     elf_file: &[u8],
-    fb: &mut Framebuffer,
-) -> core::result::Result<unsafe extern "C" fn(), String> {
+) -> core::result::Result<unsafe extern "C" fn(&boot_types::BootData), String> {
     let elf_header: *const u8 = &elf_file[0];
     let elf_header = unsafe { &*(elf_header as *const ElfHeader) };
     let magic = from_utf8(&elf_header.e_ident[1..4])
@@ -64,18 +64,16 @@ pub fn load_elf(
         if ph.p_paddr == 0 {
             continue;
         }
-        write!(fb, "loading segment: {} ;", i);
         let paddr: *mut u8 = ph.p_paddr as *mut u8;
         let buf = unsafe { &mut *slice_from_raw_parts_mut::<u8>(paddr, ph.p_memsz) };
         for b in buf.iter_mut() {
             *b = 0
         }
-        write!(fb, "buf addr: {:p}, len: {:x}\n", buf, buf.len());
         buf[0..ph.p_filesz].copy_from_slice(&elf_file[ph.p_offset..ph.p_offset + ph.p_filesz])
     }
 
     // use transmute() to forcefully cast e_entry to a fn()
     let void_ptr = elf_header.e_entry as *const ();
-    let fn_ptr: unsafe extern "C" fn() = unsafe { mem::transmute(void_ptr) };
+    let fn_ptr: unsafe extern "C" fn(&boot_types::BootData) = unsafe { mem::transmute(void_ptr) };
     Ok(fn_ptr)
 }

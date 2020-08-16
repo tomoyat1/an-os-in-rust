@@ -6,3 +6,5 @@ edition = "2018"
 
 [dependencies]
 rlibc = "1.0"
+uefi = "0.5.0"
+bootloader = { path = './bootloader' }
