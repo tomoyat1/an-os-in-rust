@@ -21,7 +21,7 @@ mod boot;
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
 pub unsafe extern "C" fn start(boot_data: *mut bootloader::boot_types::BootData) {
     let foo = 1 + 1;
-    let boot_data = boot::BootData::relocate(&mut *boot_data, KERNEL_BASE);
+    let boot_data = boot::BootData::relocate(boot_data, KERNEL_BASE);
     init_mm(boot_data.memory_map); // TODO: error handling
 
     // let stack_top: *mut u8 = 0xffffffffcfffffff as *mut u8;

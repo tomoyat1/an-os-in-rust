@@ -5,8 +5,12 @@ use uefi::table::boot;
 
 /// BootData is the data structure passed to the kernel.
 #[repr(C)]
-pub struct BootData<'buf> {
-    pub memory_map: &'buf [boot::MemoryDescriptor],
+pub struct BootData {
+    /// Identity-mapped base address of MemoryDescriptor array.
+    pub memory_map_buf: *mut boot::MemoryDescriptor,
+
+    /// Number of MemoryDescriptors in array.
+    pub memory_map_len: usize,
     pub framebuffer: RawFramebuffer,
     pub system_table: *const table::SystemTable<table::Runtime>
 }

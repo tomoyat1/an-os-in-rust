@@ -26,7 +26,8 @@ pub mod boot_types;
 use crate::loader::elf::load_elf;
 use crate::loader::load_file;
 use core::mem;
-use core::ptr::slice_from_raw_parts;
+use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
+use crate::boot_types::BootData;
 
 static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
 
@@ -49,6 +50,12 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let fb = &mut Framebuffer::new(&system_table);
     fb.init().expect("failed to initialize framebuffer");
     system_table.boot_services().stall(1000000);
+    let loaded_image = system_table.boot_services().handle_protocol::<LoadedImage>(handle)
+        .expect("error when loading loaded image protocol")
+        .expect("warnings when loading loaded image protocol");
+    let loaded_image = unsafe {&*loaded_image.get()};
+    let (base, size) = loaded_image.info();
+    writeln!(fb, "Bootloader was loaded at {:x}", base);
     writeln!(fb, "Loading kernel...");
 
     // Proceed to bootstrapping the kernel.
@@ -63,21 +70,51 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
         }
     };
 
+    // system_table.boot_services().stall(10_000_000);
+    // writeln!(fb, "Booting kernel...");
     let raw_fb = fb.raw_framebuffer();
 
     let len = system_table.boot_services().memory_map_size();
-    let mut mmap = Vec::<u8>::with_capacity(len);
+    let mut mmap = Vec::<u8>::with_capacity(len * 2);
     unsafe {
-        mmap.set_len(len)
+        mmap.set_len(len * 2)
     }
+
+    // allocate new memory map before exit_boot_services(), since memory allocation will not be
+    // available after this point.
+    let mut virt_mmap = Vec::<MemoryDescriptor>::with_capacity(len * 2 / mem::size_of::<MemoryDescriptor>() + 1);
     // TODO: exit_boot_services() depends on having 2 implementations of Framebuffer for boot and
     //       runtime, because system_table will be consumed in this call.
     //       We cannot use the old fb beyond this point.
     let (system_table, mmap_iter) = system_table.exit_boot_services(handle, mmap.as_mut_slice())
         .expect("failed to exit boot services")
         .expect("warnings when exiting boot services");
-    let system_table = &system_table as *const SystemTable<Runtime>;
 
+    // Pass virtual memory mappings to UEFI for relocation of runtime services.
+    let mut head: u64 = 0xffffffff80000000;
+    for entry in mmap_iter {
+        let mut ve = MemoryDescriptor::default();
+        ve.ty = entry.ty;
+        ve.phys_start = entry.phys_start;
+        ve.page_count = entry.page_count;
+        ve.att = entry.att;
+        head -= (ve.page_count * 0x1000);
+        ve.virt_start = head;
+        virt_mmap.push(ve);
+    }
+
+    unsafe {
+        system_table.runtime_services().set_virtual_address_map(&mut virt_mmap)
+            .expect("error when setting virtual memory map");
+    }
+
+    // And throw the above work into the trash can ;)
+    // let mmap_ptr = 0xdeadbeef as *mut MemoryDescriptor;
+    // let mmap_ptr = unsafe {&mut *mmap_ptr};
+    // let mut mmap = slice_from_raw_parts_mut(mmap_ptr, 2);
+    // let mut mmap = unsafe {&mut *mmap};
+
+    let system_table = &system_table as *const SystemTable<Runtime>;
     let entry_point = match load_elf(&file) {
         Ok(ep) => ep,
         Err(e) => {
@@ -139,28 +176,12 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     // let flags: u128 = 0x0
     //
 
-    let mut mmap = Vec::new();
-    let d = MemoryDescriptor::default();
-    // mmap.push(MemoryDescriptor::default());
-    // let mut head: u64 = 0xffffffff80000000;
-    // for entry in mmap_iter {
-    //     let mut ve = MemoryDescriptor::default();
-    //     ve.ty = entry.ty;
-    //     ve.phys_start = entry.phys_start;
-    //     ve.page_count = entry.page_count;
-    //     ve.att = entry.att;
-    //     head = head - (ve.page_count * 0x1000);
-    //     ve.virt_start = head;
-    //     mmap.push(*entry) ;
-    // }
-
-    // system_table.runtime_services().set_virtual_address_map();
-
     let boot_data = 0x400000 as *mut boot_types::BootData;
 
     let boot_data = unsafe {
         ptr::write(boot_data, boot_types::BootData{
-            memory_map: &mmap,
+            memory_map_buf: virt_mmap.as_mut_ptr(),
+            memory_map_len: virt_mmap.len(),
             framebuffer: raw_fb,
             system_table,
         });
