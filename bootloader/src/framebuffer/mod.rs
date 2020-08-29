@@ -11,9 +11,8 @@ const SQUARE_SIZE: usize = 50;
 
 mod fonts;
 use crate::framebuffer::fonts::{FONT_HEIGHT, FONT_WIDTH};
-use crate::boot_types;
 use array_macro::__core::ptr::slice_from_raw_parts_mut;
-use bootloader::boot_types::RawFramebuffer;
+use bootlib::types::RawFramebuffer;
 
 // TODO: make this generic in the sense that it can either use gop or the raw framebuffer behind it.
 pub struct Framebuffer<'gop> {
@@ -109,13 +108,13 @@ impl<'gop> Framebuffer<'gop> {
 
     /// Converts to RawFramebuffer, for passing to the kernel.
     /// This is required since we cannot depend on GOP at runtime.
-    pub fn raw_framebuffer(&mut self) -> boot_types::RawFramebuffer {
+    pub fn raw_framebuffer(&mut self) -> RawFramebuffer {
         let mut raw_fb = self.gop.frame_buffer();
         let base = raw_fb.as_mut_ptr();
         let size = raw_fb.size();
         let mode_info = self.gop.current_mode_info();
         let (hr, vr) = mode_info.resolution();
-        boot_types::RawFramebuffer{
+        RawFramebuffer{
             framebuffer_base: base,
             framebuffer_size: size,
             horizontal_resolution: hr,

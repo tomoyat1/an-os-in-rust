@@ -4,7 +4,7 @@
 name = "an-operating-system-in-rust"
 version = "0.1.0"
 dependencies = [
- "bootloader 0.1.0",
+ "bootlib 0.1.0",
  "rlibc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "uefi 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -30,10 +30,18 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "bootlib"
+version = "0.1.0"
+dependencies = [
+ "uefi 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "bootloader"
 version = "0.1.0"
 dependencies = [
  "array-macro 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bootlib 0.1.0",
  "log 0.4.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "rlibc 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "uefi 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",

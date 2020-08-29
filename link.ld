@@ -19,6 +19,7 @@ SECTIONS
 	}
 	.rodata ALIGN(4K) : AT (ADDR (.rodata) - 0xFFFFFFFF80000000) {
 	    *(.rodata)
+	    *(.rodata.*)
 	}
 	.bss ALIGN(4K) : AT (ADDR (.bss) - 0xFFFFFFFF80000000) {
 		*(COMMON)

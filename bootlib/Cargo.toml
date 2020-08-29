@@ -1,0 +1,8 @@
+[package]
+name = "bootlib"
+version = "0.1.0"
+authors = ["Tomoya Tabuchi <t@tomoyat1.com>"]
+edition = "2018"
+
+[dependencies]
+uefi = "0.5.0"

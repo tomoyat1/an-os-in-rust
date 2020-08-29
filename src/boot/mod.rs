@@ -1,11 +1,8 @@
 use uefi::table;
 use uefi::table::boot;
 
-use bootloader::boot_types;
 use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use uefi::table::boot::MemoryDescriptor;
-use core::borrow::Borrow;
-use uefi::prelude::SystemTable;
 
 pub(crate) struct BootData<'a> {
     pub memory_map: &'a [boot::MemoryDescriptor],
@@ -14,7 +11,7 @@ pub(crate) struct BootData<'a> {
 }
 
 impl<'a> BootData<'a> {
-    pub fn relocate(mut phys_boot_data: *mut boot_types::BootData, kernel_base: usize) -> Self {
+    pub fn relocate(mut phys_boot_data: *mut bootlib::types::BootData, kernel_base: usize) -> Self {
         let phys_boot_data = unsafe { &mut *phys_boot_data };
         let mm_sz = phys_boot_data.memory_map_len;
 
@@ -40,7 +37,7 @@ pub(crate) struct RawFramebuffer<'a> {
 }
 
 impl<'a> RawFramebuffer<'a> {
-    fn relocate(phys_fb: &boot_types::RawFramebuffer, kernel_base: usize) -> Self {
+    fn relocate(phys_fb: &bootlib::types::RawFramebuffer, kernel_base: usize) -> Self {
         let fb_ptr = phys_fb.framebuffer_base;
         let fb_sz = phys_fb.framebuffer_size;
         let fb_buf = slice_from_raw_parts_mut(fb_ptr, fb_sz);

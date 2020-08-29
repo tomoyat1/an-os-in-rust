@@ -13,7 +13,7 @@
   "llvm-target": "x86_64-unknown-none",
   "lto": "no",
   "max-atomic-width": 64,
-  "os": "unknown",
+  "os": "none",
   "panic-strategy": "abort",
   "position-independent-executables": false,
   "pre-link-args": {

@@ -1,5 +1,8 @@
 use uefi::table::boot;
-// use alloc::vec;
+use alloc::vec;
+
+use crate::mm::malloc;
+use uefi::table::boot::MemoryDescriptor;
 
 extern "C" {
     #[link_name = "boot_pml4"]
@@ -20,6 +23,8 @@ const MASK_38_30: usize = 0x0000007fc0000000;
 /// This also maps memory required for UEFI runtime services so that memory layout matches
 /// what the bootloader set with SetVirtualAddressMap().
 pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
+    malloc::init();
+
     let kernel_pml4 = unsafe {&mut KERNEL_PML4};
     let boot_pdpt = unsafe {&mut BOOT_PDPT};
 
@@ -29,16 +34,28 @@ pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
     let pdpte = 1<<30 as u64 & MASK_47_30 as u64 | 0x83;
     boot_pdpt[pdpt_idx] = pdpte;
 
-    // Unmap identity mapping for lower half entrypoint.
-    kernel_pml4[0] = 0;
-
     // Map UEFI runtime service memory to space below kernel.
+    // memory_map contains ALL mappings, including ones unnecessary after exit_boot_services().
+    // It is our responsibility here to filter out unnecessary MemoryTypes.
     // TODO: implement
+    let mut virt_memory_map: vec::Vec<MemoryDescriptor> = vec::Vec::with_capacity(memory_map.len());
     for mdesc in memory_map {
-        // allocate memory for paging structure, which requires a global_allocator.
+        match mdesc.ty {
+            boot::MemoryType::RUNTIME_SERVICES_CODE => {
+                let ty = mdesc.ty;
+                let virt_start = mdesc.virt_start;
+                let phys_start = mdesc.phys_start;
+            },
+            boot::MemoryType::RUNTIME_SERVICES_DATA => {
+
+            },
+            _ => { /* noop */ },
+        }
 
     }
 
+    // Unmap identity mapping for lower half entrypoint.
+    kernel_pml4[0] = 0;
 
     flush_tlb();
 }

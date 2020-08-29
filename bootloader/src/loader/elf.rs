@@ -3,10 +3,11 @@ use alloc::string::String;
 use core::mem;
 
 use crate::framebuffer::Framebuffer;
-use crate::boot_types;
 use core::fmt::Write;
 use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use core::str::from_utf8;
+
+use log::info;
 
 const EI_NIDENT: usize = 16;
 
@@ -42,7 +43,7 @@ struct ProgramHeader {
 
 pub fn load_elf(
     elf_file: &[u8],
-) -> core::result::Result<unsafe extern "C" fn(&boot_types::BootData), String> {
+) -> core::result::Result<unsafe extern "C" fn(&bootlib::types::BootData), String> {
     let elf_header: *const u8 = &elf_file[0];
     let elf_header = unsafe { &*(elf_header as *const ElfHeader) };
     let magic = from_utf8(&elf_header.e_ident[1..4])
@@ -74,6 +75,6 @@ pub fn load_elf(
 
     // use transmute() to forcefully cast e_entry to a fn()
     let void_ptr = elf_header.e_entry as *const ();
-    let fn_ptr: unsafe extern "C" fn(&boot_types::BootData) = unsafe { mem::transmute(void_ptr) };
+    let fn_ptr: unsafe extern "C" fn(&bootlib::types::BootData) = unsafe { mem::transmute(void_ptr) };
     Ok(fn_ptr)
 }

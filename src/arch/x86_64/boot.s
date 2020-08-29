@@ -21,6 +21,7 @@ boot_heap_pdt:
 .global boot_pt
 boot_pt:
     .skip 0x1000
+.global heap_bottom
 heap_bottom:
 
 .section .bootstrap_stack, "aw", @nobits

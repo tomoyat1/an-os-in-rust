@@ -1,11 +1,13 @@
-
 #![no_std]
 #![no_main]
+#![no_builtins]
 #![feature(linkage)]
 #![feature(asm)]
+#![feature(alloc_error_handler)]
 
 extern crate rlibc;
-extern crate bootloader;
+extern crate alloc;
+extern crate bootlib;
 
 use core::panic::PanicInfo;
 
@@ -14,13 +16,14 @@ use arch::x86_64::mm::{init_mm, KERNEL_BASE};
 
 mod boot;
 
+mod mm;
+
 #[no_mangle]
 #[linkage = "external"]
 /// start() is the entry point for kernel code.
 /// # Arguments
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
-pub unsafe extern "C" fn start(boot_data: *mut bootloader::boot_types::BootData) {
-    let foo = 1 + 1;
+pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let boot_data = boot::BootData::relocate(boot_data, KERNEL_BASE);
     init_mm(boot_data.memory_map); // TODO: error handling
 
