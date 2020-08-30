@@ -37,21 +37,21 @@ pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
     // Map UEFI runtime service memory to space below kernel.
     // memory_map contains ALL mappings, including ones unnecessary after exit_boot_services().
     // It is our responsibility here to filter out unnecessary MemoryTypes.
-    // TODO: implement
-    let mut virt_memory_map: vec::Vec<MemoryDescriptor> = vec::Vec::with_capacity(memory_map.len());
     for mdesc in memory_map {
-        match mdesc.ty {
-            boot::MemoryType::RUNTIME_SERVICES_CODE => {
-                let ty = mdesc.ty;
-                let virt_start = mdesc.virt_start;
-                let phys_start = mdesc.phys_start;
-            },
-            boot::MemoryType::RUNTIME_SERVICES_DATA => {
+        let ty = mdesc.ty;
+        let virt_start = mdesc.virt_start;
+        let phys_start = mdesc.phys_start;
+        let page_count = mdesc.page_count;
 
-            },
-            _ => { /* noop */ },
-        }
-
+        // TODO: implement later when we use UEFI runtime services.
+        // match mdesc.ty {
+        //     boot::MemoryType::RUNTIME_SERVICES_CODE => {
+        //     },
+        //     boot::MemoryType::RUNTIME_SERVICES_DATA => {
+        //
+        //     },
+        //     _ => { /* noop */ },
+        // }
     }
 
     // Unmap identity mapping for lower half entrypoint.
