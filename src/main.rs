@@ -13,6 +13,7 @@ use core::panic::PanicInfo;
 
 mod arch;
 use arch::x86_64::mm::{init_mm, KERNEL_BASE};
+use arch::x86_64::pm::{init_pm};
 
 mod boot;
 
@@ -26,6 +27,7 @@ mod mm;
 pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let boot_data = boot::BootData::relocate(boot_data, KERNEL_BASE);
     init_mm(boot_data.memory_map); // TODO: error handling
+    init_pm();
 
     // let stack_top: *mut u8 = 0xffffffffcfffffff as *mut u8;
     // let stack_top = &mut *stack_top;
