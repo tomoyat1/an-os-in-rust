@@ -3,7 +3,7 @@ use core::ptr::null_mut;
 
 extern "C" {
     #[link_name = "heap_bottom"]
-    static mut HEAP_BOTTOM: usize;
+    static mut HEAP_BOTTOM: &'static usize;
 }
 
 #[global_allocator]
@@ -19,8 +19,9 @@ pub struct KernelAllocator {
 
 pub fn init() {
     unsafe {
-        KERNEL_ALLOCATOR.heap_bottom = HEAP_BOTTOM;
-        KERNEL_ALLOCATOR.head = HEAP_BOTTOM;
+        let bottom = *HEAP_BOTTOM;
+        KERNEL_ALLOCATOR.heap_bottom = bottom;
+        KERNEL_ALLOCATOR.head = bottom;
     }
 }
 
