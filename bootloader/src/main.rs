@@ -4,10 +4,10 @@
 #![feature(alloc)]
 #![feature(asm)]
 extern crate alloc;
+extern crate bootlib;
 extern crate rlibc;
 extern crate uefi;
 extern crate uefi_services;
-extern crate bootlib;
 
 use crate::framebuffer::Framebuffer;
 use alloc::vec::*;
@@ -16,18 +16,18 @@ use core::ptr;
 
 use log::info;
 use uefi::prelude::*;
-use uefi::table::{Runtime};
+use uefi::proto::loaded_image::LoadedImage;
 use uefi::table::boot;
-use uefi::table::boot::{EventType, SearchType, TimerTrigger, Tpl, MemoryDescriptor};
-use uefi::proto::loaded_image::{LoadedImage};
+use uefi::table::boot::{EventType, MemoryDescriptor, SearchType, TimerTrigger, Tpl};
+use uefi::table::Runtime;
 
 pub mod framebuffer;
 pub mod loader;
 use crate::loader::elf::load_elf;
 use crate::loader::load_file;
+use bootlib::types::BootData;
 use core::mem;
 use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
-use bootlib::types::BootData;
 
 static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
 
@@ -44,10 +44,12 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let fb = &mut Framebuffer::new(&system_table);
     fb.init().expect("failed to initialize framebuffer");
     system_table.boot_services().stall(1000000);
-    let loaded_image = system_table.boot_services().handle_protocol::<LoadedImage>(handle)
+    let loaded_image = system_table
+        .boot_services()
+        .handle_protocol::<LoadedImage>(handle)
         .expect("error when loading loaded image protocol")
         .expect("warnings when loading loaded image protocol");
-    let loaded_image = unsafe {&*loaded_image.get()};
+    let loaded_image = unsafe { &*loaded_image.get() };
     let (base, size) = loaded_image.info();
     writeln!(fb, "Bootloader was loaded at {:x}", base);
     writeln!(fb, "Loading kernel...");
@@ -70,14 +72,14 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let len = system_table.boot_services().memory_map_size();
     let len = len * 2;
     let mut mmap = Vec::<u8>::with_capacity(len);
-    unsafe {
-        mmap.set_len(len)
-    }
+    unsafe { mmap.set_len(len) }
 
     // Allocate new memory map before exit_boot_services(), since memory allocation will not be
     // available after this point.
-    let mut virt_mmap = Vec::<MemoryDescriptor>::with_capacity(len / mem::size_of::<MemoryDescriptor>() + 1);
-    let (system_table, mmap_iter) = system_table.exit_boot_services(handle, mmap.as_mut_slice())
+    let mut virt_mmap =
+        Vec::<MemoryDescriptor>::with_capacity(len / mem::size_of::<MemoryDescriptor>() + 1);
+    let (system_table, mmap_iter) = system_table
+        .exit_boot_services(handle, mmap.as_mut_slice())
         .expect("failed to exit boot services")
         .expect("warnings when exiting boot services");
 
@@ -95,7 +97,9 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     }
 
     unsafe {
-        system_table.runtime_services().set_virtual_address_map(&mut virt_mmap)
+        system_table
+            .runtime_services()
+            .set_virtual_address_map(&mut virt_mmap)
             .expect("error when setting virtual memory map");
     }
 
@@ -110,14 +114,17 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let boot_data = 0x400000 as *mut bootlib::types::BootData;
 
     let boot_data = unsafe {
-        ptr::write(boot_data, bootlib::types::BootData{
-            memory_map_buf: virt_mmap.as_mut_ptr(),
-            memory_map_len: virt_mmap.len(),
-            framebuffer: raw_fb,
-            system_table,
-        });
+        ptr::write(
+            boot_data,
+            bootlib::types::BootData {
+                memory_map_buf: virt_mmap.as_mut_ptr(),
+                memory_map_len: virt_mmap.len(),
+                framebuffer: raw_fb,
+                system_table,
+            },
+        );
         &mut *boot_data
     };
     unsafe { entry_point(boot_data) };
-    loop{}
+    loop {}
 }

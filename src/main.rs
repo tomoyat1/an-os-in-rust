@@ -5,15 +5,15 @@
 #![feature(asm)]
 #![feature(alloc_error_handler)]
 
-extern crate rlibc;
 extern crate alloc;
 extern crate bootlib;
+extern crate rlibc;
 
 use core::panic::PanicInfo;
 
 mod arch;
 use arch::x86_64::mm::{init_mm, KERNEL_BASE};
-use arch::x86_64::pm::{init_pm};
+use arch::x86_64::pm::init_pm;
 
 mod boot;
 
@@ -27,7 +27,7 @@ mod mm;
 pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let boot_data = boot::BootData::relocate(boot_data, KERNEL_BASE);
     init_mm(boot_data.memory_map); // TODO: error handling
-    init_pm();
+    let gdt = init_pm();
 
     // let stack_top: *mut u8 = 0xffffffffcfffffff as *mut u8;
     // let stack_top = &mut *stack_top;
@@ -37,7 +37,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 
     // Scheduler should not return;
     // panic!("Scheduler has returned when it shouldn't have");
-    loop{}
+    loop {}
 }
 
 #[panic_handler]
@@ -45,5 +45,5 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 fn panic(_info: &PanicInfo) -> ! {
     // Do nothing and loop for now.
     // TODO: Paint screen red.
-    loop{}
+    loop {}
 }

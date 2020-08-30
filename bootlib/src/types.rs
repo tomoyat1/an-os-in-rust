@@ -1,5 +1,4 @@
 /// This module contains data types passed to the kernel.
-
 use uefi::table;
 use uefi::table::boot;
 
@@ -12,7 +11,7 @@ pub struct BootData {
     /// Number of MemoryDescriptors in array.
     pub memory_map_len: usize,
     pub framebuffer: RawFramebuffer,
-    pub system_table: *const table::SystemTable<table::Runtime>
+    pub system_table: *const table::SystemTable<table::Runtime>,
 }
 
 #[repr(C)]

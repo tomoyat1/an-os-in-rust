@@ -114,7 +114,7 @@ impl<'gop> Framebuffer<'gop> {
         let size = raw_fb.size();
         let mode_info = self.gop.current_mode_info();
         let (hr, vr) = mode_info.resolution();
-        RawFramebuffer{
+        RawFramebuffer {
             framebuffer_base: base,
             framebuffer_size: size,
             horizontal_resolution: hr,

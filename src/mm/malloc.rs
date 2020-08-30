@@ -1,9 +1,9 @@
 use core::alloc;
 use core::ptr::null_mut;
 
+#[link(name = "boot")]
 extern "C" {
-    #[link_name = "heap_bottom"]
-    static mut HEAP_BOTTOM: &'static usize;
+    static heap_bottom: usize;
 }
 
 #[global_allocator]
@@ -19,7 +19,7 @@ pub struct KernelAllocator {
 
 pub fn init() {
     unsafe {
-        let bottom = *HEAP_BOTTOM;
+        let bottom = &heap_bottom as *const usize as usize;
         KERNEL_ALLOCATOR.heap_bottom = bottom;
         KERNEL_ALLOCATOR.head = bottom;
     }
@@ -29,7 +29,7 @@ unsafe impl alloc::GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: alloc::Layout) -> *mut u8 {
         let mut head = self.head as usize;
         if head == 0 {
-            return null_mut()
+            return null_mut();
         }
         let (size, align) = (layout.size(), layout.align());
         head = (head / align) * align + align;
@@ -51,7 +51,5 @@ unsafe impl alloc::GlobalAlloc for KernelAllocator {
 #[alloc_error_handler]
 #[no_mangle]
 fn oom(_: alloc::Layout) -> ! {
-    unsafe {
-        panic!("oom")
-    }
+    unsafe { panic!("oom") }
 }

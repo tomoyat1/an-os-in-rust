@@ -75,6 +75,7 @@ pub fn load_elf(
 
     // use transmute() to forcefully cast e_entry to a fn()
     let void_ptr = elf_header.e_entry as *const ();
-    let fn_ptr: unsafe extern "C" fn(&bootlib::types::BootData) = unsafe { mem::transmute(void_ptr) };
+    let fn_ptr: unsafe extern "C" fn(&bootlib::types::BootData) =
+        unsafe { mem::transmute(void_ptr) };
     Ok(fn_ptr)
 }

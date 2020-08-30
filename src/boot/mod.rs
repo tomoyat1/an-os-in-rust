@@ -7,7 +7,7 @@ use uefi::table::boot::MemoryDescriptor;
 pub(crate) struct BootData<'a> {
     pub memory_map: &'a [boot::MemoryDescriptor],
     pub framebuffer: RawFramebuffer<'a>,
-    pub system_table: &'a table::SystemTable<table::Runtime>
+    pub system_table: &'a table::SystemTable<table::Runtime>,
 }
 
 impl<'a> BootData<'a> {
@@ -23,7 +23,7 @@ impl<'a> BootData<'a> {
         Self {
             memory_map: unsafe { &*mmap },
             framebuffer: RawFramebuffer::relocate(&phys_boot_data.framebuffer, kernel_base),
-            system_table: unsafe {&*phys_boot_data.system_table},
+            system_table: unsafe { &*phys_boot_data.system_table },
         }
     }
 }
@@ -42,7 +42,7 @@ impl<'a> RawFramebuffer<'a> {
         let fb_sz = phys_fb.framebuffer_size;
         let fb_buf = slice_from_raw_parts_mut(fb_ptr, fb_sz);
         Self {
-            framebuffer: unsafe {& mut *fb_buf},
+            framebuffer: unsafe { &mut *fb_buf },
             horizontal_resolution: phys_fb.horizontal_resolution,
             vertical_resolution: phys_fb.vertical_resolution,
             pixels_per_scan_line: phys_fb.pixels_per_scan_line,
