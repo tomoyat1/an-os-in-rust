@@ -5,9 +5,9 @@
 #![feature(asm)]
 #![feature(alloc_error_handler)]
 
+extern crate rlibc;
 extern crate alloc;
 extern crate bootlib;
-extern crate rlibc;
 
 use core::panic::PanicInfo;
 
