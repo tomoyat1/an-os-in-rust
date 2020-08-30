@@ -1,0 +1,8 @@
+[target.x86_64-unknown-aosir]
+rustflags = [
+  "-C",
+  "link-arg=-Tlink.ld"
+]
+
+[build]
+target = "x86_64-unknown-aosir.json"
