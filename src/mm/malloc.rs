@@ -21,6 +21,8 @@ pub fn init() {
     unsafe {
         let bottom = &heap_bottom as *const usize as usize;
         KERNEL_ALLOCATOR.heap_bottom = bottom;
+
+        // For some reason, this spontaneously changes to 0 between calls to GlobalAlloc.
         KERNEL_ALLOCATOR.head = bottom;
     }
 }
