@@ -16,9 +16,17 @@ fn main() {
         .status()
         .unwrap();
 
+    Command::new("gcc")
+        .args(&["src/arch/x86_64/isr.s", "-c", "-mcmodel=large", "-g", "-o"])
+        .arg(&format!("{}/libisr.a", out_dir))
+        .status()
+        .unwrap();
+
     println!("cargo:rustc-link-search={}", out_dir);
     println!("cargo:rustc-link-lib=boot");
     println!("cargo:rustc-link-lib=pm");
+    println!("cargo:rustc-link-lib=isr");
     println!("cargo:rerun-if-changed=src/boot/boot.s");
     println!("cargo:rerun-if-changed=src/boot/pm.s");
+    println!("cargo:rerun-if-changed=src/boot/isr.s");
 }
