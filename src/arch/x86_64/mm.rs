@@ -23,8 +23,6 @@ const MASK_38_30: usize = 0x0000007fc0000000;
 /// This also maps memory required for UEFI runtime services so that memory layout matches
 /// what the bootloader set with SetVirtualAddressMap().
 pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
-    malloc::init();
-
     let kernel_pml4 = unsafe { &mut KERNEL_PML4 };
     let boot_pdpt = unsafe { &mut BOOT_PDPT };
 
