@@ -126,10 +126,11 @@ impl IOAPIC {
         self.write(0x12, 0x21);
         self.write(0x13, (lapic_id << 24) & 0x0f000000);
 
-        // APIC timer
-        // TODO: register noop handler for APIC timer interrupts
-        // self.write(0x14, 0x20); // since we don't have a valid apic timer, this causes problems
-        // self.write(0x15, (lapic_id << 24) & 0x0f000000);
+        // PIT
+        // The following assumes that PIT is wired to ISA line 0 and remapped to line 2 of I/O APIC
+        // TODO: parse MADT for remappings
+        self.write(0x14, 0x100FF); // mask PIT for now, since  it's  causing #GP faults
+        self.write(0x15, (lapic_id << 24) & 0x0f000000);
 
         // Mouse (masked)
         self.write(0x28, 0x100FF);
