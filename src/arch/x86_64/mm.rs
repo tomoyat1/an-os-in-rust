@@ -53,7 +53,9 @@ pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
     }
 
     // Unmap identity mapping for lower half entrypoint.
-    kernel_pml4[0] = 0;
+    // If we tear this down here, APIC related code which depends on identity mapping does not work.
+
+    // kernel_pdpt[0] = 0;
 
     flush_tlb();
 }

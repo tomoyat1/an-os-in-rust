@@ -1,4 +1,6 @@
 /// This module contains data types passed to the kernel.
+use core::ffi::c_void;
+
 use uefi::table;
 use uefi::table::boot;
 
@@ -12,6 +14,9 @@ pub struct BootData {
     pub memory_map_len: usize,
     pub framebuffer: RawFramebuffer,
     pub system_table: *const table::SystemTable<table::Runtime>,
+
+    // ACPI RSDP
+    pub acpi_rsdp: *const c_void,
 }
 
 #[repr(C)]

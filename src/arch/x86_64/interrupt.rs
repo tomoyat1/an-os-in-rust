@@ -1,7 +1,12 @@
 use alloc::vec;
 
+use crate::drivers::acpi;
+use core::ptr::write_volatile;
+
 extern "C" {
     fn page_fault_isr();
+    fn general_protection_fault_isr();
+    fn ps2_keyboard_isr();
     fn reload_idt(idtr: *const IDTR);
 }
 
@@ -12,12 +17,20 @@ struct IDTR {
     base: usize,
 }
 
+struct IOAPIC {
+    base_addr: usize,
+}
+
+struct LocalAPIC {
+    base_addr: usize,
+}
+
 type IDT = vec::Vec<u128>;
 
-pub fn init_int() {
-    let mut idt = vec::Vec::<u128>::with_capacity(32);
+pub fn init_int(madt: acpi::MADT) {
+    let mut idt = vec::Vec::<u128>::with_capacity(40);
     unsafe {
-        idt.set_len(32);
+        idt.set_len(40);
     }
 
     // page fault handler
@@ -33,25 +46,124 @@ pub fn init_int() {
         idt[14] = descriptor;
     }
 
+    // general protection fault handler
+    {
+        let mut descriptor: u128 = 0;
+        let handler = general_protection_fault_isr as usize;
+        descriptor |= (handler & 0xffff) as u128; // offset 15:0
+        descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
+        descriptor |= 0x8 << 16; // segment selector
+        descriptor |= 0xe << 40; // type: 0xb1110
+        descriptor |= 8 << 44; // Present flag
+
+        idt[13] = descriptor;
+    }
+
     // Set IDTR
     let idtr = IDTR {
-        limit: 255, // 32 * 8 - 1
+        limit: 40 * 8 - 1,
         base: idt.as_ptr() as usize,
     };
     unsafe {
         reload_idt(&idtr as *const IDTR);
     }
 
-    // dereference null ptr for shits and giggles
-    let foo: *mut u64 = 0x0 as *mut u64;
-    unsafe {
-        // This should page fault
-        *foo = 0xdeadbeef;
-    }
+    // The following assumes the runtime environment is APIC based.
+    // Behaviour is undefined on systems without APIC.
+    // mask_pic();
+    let lapic = LocalAPIC::new(madt.lapic_addr);
+    let ioapic = IOAPIC::new(madt.ioapic_addr);
+    // Don't consider global interrupt base for now.
+    ioapic.remap(lapic.id());
+
+}
+
+#[no_mangle]
+unsafe extern "C" fn general_protection_fault_handler() {
+    let foo = 1 + 1;
+    /* no-op */
 }
 
 #[no_mangle]
 unsafe extern "C" fn page_fault_handler() {
     let foo = 1 + 1;
     /* no-op */
+}
+
+#[no_mangle]
+unsafe extern "C" fn ps2_keyboard_handler() {
+    let foo = 1 + 1;
+    /* no-op */
+}
+
+fn mask_pic() {
+    unsafe {
+        asm!(
+            "mov {0:l}, 0xff",
+            "out 0xa1, {0:l}",
+            "out 0x21, {0:l}",
+            out(reg_abcd) _,
+        )
+    }
+}
+
+impl IOAPIC {
+    fn new(base_addr: usize) -> Self {
+        Self { base_addr }
+    }
+
+    fn write(&self, index: u32, value: u32) {
+        let ioregsel = self.base_addr as *mut u32;
+        let iowin = (self.base_addr + 0x10) as *mut u32;
+        unsafe {
+            write_volatile(ioregsel, index);
+            write_volatile(iowin, value);
+        }
+    }
+
+    fn remap(&self, lapic_id: u32) {
+        // PS/2 keyboard
+        self.write(0x12, 0x21);
+        self.write(0x13, (lapic_id << 24) & 0x0f000000);
+
+        // APIC timer
+        // TODO: register noop handler for APIC timer interrupts
+        // self.write(0x14, 0x20); // since we don't have a valid apic timer, this causes problems
+        // self.write(0x15, (lapic_id << 24) & 0x0f000000);
+
+        // Mouse (masked)
+        self.write(0x28, 0x100FF);
+        self.write(0x19, (lapic_id << 24) & 0x0f000000);
+
+        // Spurious Interrupt Vector
+        self.write(0xf0, (0x1 << 8) + 0xff);
+
+        // Enable interrupts
+        unsafe {
+            asm!(
+                "sti"
+            );
+        }
+    }
+}
+
+impl LocalAPIC {
+    fn new(base_addr: usize) -> Self {
+        Self{
+            base_addr,
+        }
+    }
+
+    /// Get local APIC ID of executing processor.
+    fn id(&self) -> u32 {
+        self.read(0x20)
+    }
+
+    /// Read register at index.
+    fn read(&self, index: usize) -> u32 {
+        let reg = (self.base_addr + index as usize) as *mut u32;
+        unsafe {
+            *reg
+        }
+    }
 }
