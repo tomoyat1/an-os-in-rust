@@ -13,6 +13,7 @@ use crate::framebuffer::Framebuffer;
 use alloc::vec::*;
 use core::fmt::Write;
 use core::ptr;
+use core::ffi::c_void;
 
 use log::info;
 use uefi::prelude::*;
@@ -28,6 +29,7 @@ use crate::loader::load_file;
 use bootlib::types::BootData;
 use core::mem;
 use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
+use uefi::table::cfg::ACPI2_GUID;
 
 static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
 
@@ -53,6 +55,16 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let (base, size) = loaded_image.info();
     writeln!(fb, "Bootloader was loaded at {:x}", base);
     writeln!(fb, "Loading kernel...");
+
+    // ACPI RSDP
+    let mut acpi_rsdp: *const c_void = 0x0 as *const c_void;
+
+    for t in system_table.config_table() {
+        if t.guid == ACPI2_GUID {
+            acpi_rsdp = t.address;
+        }
+    }
+
 
     // Proceed to bootstrapping the kernel.
     let file = match load_file(&system_table) {
@@ -121,6 +133,7 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
                 memory_map_len: virt_mmap.len(),
                 framebuffer: raw_fb,
                 system_table,
+                acpi_rsdp,
             },
         );
         &mut *boot_data

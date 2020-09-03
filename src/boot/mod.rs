@@ -1,19 +1,22 @@
+use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
+use core::ffi::c_void;
+
 use uefi::table;
 use uefi::table::boot;
-
-use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use uefi::table::boot::MemoryDescriptor;
 
 pub(crate) struct BootData<'a> {
     pub memory_map: &'a [boot::MemoryDescriptor],
     pub framebuffer: RawFramebuffer<'a>,
     pub system_table: &'a table::SystemTable<table::Runtime>,
+    pub acpi_rsdp:  *const c_void,
 }
 
 impl<'a> BootData<'a> {
     pub fn relocate(mut phys_boot_data: *mut bootlib::types::BootData, kernel_base: usize) -> Self {
         let phys_boot_data = unsafe { &mut *phys_boot_data };
         let mm_sz = phys_boot_data.memory_map_len;
+        let acpi_rsdp = phys_boot_data.acpi_rsdp;
 
         // On QEMU, phys_boot_data.memory_map_buf happens to be larger than 2 GiB, causing mm_ptr to
         // overflow and resulting in a panic. Oh, shit.
@@ -24,6 +27,7 @@ impl<'a> BootData<'a> {
             memory_map: unsafe { &*mmap },
             framebuffer: RawFramebuffer::relocate(&phys_boot_data.framebuffer, kernel_base),
             system_table: unsafe { &*phys_boot_data.system_table },
+            acpi_rsdp,
         }
     }
 }
