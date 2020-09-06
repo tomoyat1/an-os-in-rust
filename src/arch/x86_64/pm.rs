@@ -60,6 +60,8 @@ pub fn init_pm() -> GDT {
         reload_gdt(&gdtr as *const GDTR);
     }
 
+    // TODO: setup a task state segment for kernel-context task
+
     // Return to caller so that our new GDT wouldn't get torn down.
     // maybe consider using Box::leak()
     gdt

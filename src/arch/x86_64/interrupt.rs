@@ -7,6 +7,7 @@ extern "C" {
     fn page_fault_isr();
     fn general_protection_fault_isr();
     fn ps2_keyboard_isr();
+    fn pit_isr();
     fn reload_idt(idtr: *const IDTR);
 }
 
@@ -40,10 +41,10 @@ pub fn init_int(madt: acpi::MADT) {
         descriptor |= (handler & 0xffff) as u128; // offset 15:0
         descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
         descriptor |= 0x8 << 16; // segment selector
-        descriptor |= 0xe << 40; // type: 0xb1110
+        descriptor |= 0xe << 40; // type: 0b1110
         descriptor |= 8 << 44; // Present flag
 
-        idt[14] = descriptor;
+        idt[0xe] = descriptor;
     }
 
     // general protection fault handler
@@ -53,11 +54,27 @@ pub fn init_int(madt: acpi::MADT) {
         descriptor |= (handler & 0xffff) as u128; // offset 15:0
         descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
         descriptor |= 0x8 << 16; // segment selector
-        descriptor |= 0xe << 40; // type: 0xb1110
+        descriptor |= 0xe << 40; // type: 0b1110
         descriptor |= 8 << 44; // Present flag
 
-        idt[13] = descriptor;
+        idt[0xd] = descriptor;
     }
+
+    // pit handler
+    // maybe I fucked this up and handler address non-canonical in terms of IA-32e?
+    {
+        let mut descriptor: u128 = 0;
+        let handler = pit_isr as usize;
+        descriptor |= (handler & 0xffff) as u128; // offset 15:0
+        descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
+        descriptor |= 0x8 << 16; // segment selector
+        descriptor |= 0xe << 40; // type: 0b1110
+        descriptor |= 8 << 44; // Present flag
+
+        idt[0x20] = descriptor;
+    }
+    // yet, deemed insufficient by CPU, raise #GP with 0x202 as error code
+    // maybe this has something to do with a task state segment (or lack thereof)
 
     // Set IDTR
     let idtr = IDTR {
@@ -96,6 +113,12 @@ unsafe extern "C" fn ps2_keyboard_handler() {
     /* no-op */
 }
 
+#[no_mangle]
+unsafe extern "C" fn pit_handler() {
+    let foo = 1 + 1;
+    /* no-op */
+}
+
 fn mask_pic() {
     unsafe {
         asm!(
@@ -129,7 +152,7 @@ impl IOAPIC {
         // PIT
         // The following assumes that PIT is wired to ISA line 0 and remapped to line 2 of I/O APIC
         // TODO: parse MADT for remappings
-        self.write(0x14, 0x100FF); // mask PIT for now, since  it's  causing #GP faults
+        self.write(0x14, 0x20);
         self.write(0x15, (lapic_id << 24) & 0x0f000000);
 
         // Mouse (masked)
