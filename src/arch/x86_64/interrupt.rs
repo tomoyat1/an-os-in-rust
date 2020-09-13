@@ -84,7 +84,7 @@ pub fn init_int(madt: acpi::MADT) {
 
     // The following assumes the runtime environment is APIC based.
     // Behaviour is undefined on systems without APIC.
-    // mask_pic();
+    mask_pic();
     let lapic = LocalAPIC::new(madt.lapic_addr);
     let ioapic = IOAPIC::new(madt.ioapic_addr);
     // Don't consider global interrupt base for now.
