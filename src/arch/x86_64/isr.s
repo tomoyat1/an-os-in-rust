@@ -4,8 +4,6 @@
 # 13 General Protection Fault
 .global general_protection_fault_isr
 general_protection_fault_isr:
-    # first interrupt has error code 0x202,
-    # which means a reference to the 0x20 IDT entry caused it.
     pushq %rax
     pushq %rcx
     pushq %rdx

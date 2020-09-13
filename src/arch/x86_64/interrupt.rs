@@ -78,7 +78,7 @@ pub fn init_int(madt: acpi::MADT) {
 
     // Set IDTR
     let idtr = IDTR {
-        limit: 40 * 8 - 1,
+        limit: 40 * 16 - 1,
         base: idt.as_ptr() as usize,
     };
     unsafe {
