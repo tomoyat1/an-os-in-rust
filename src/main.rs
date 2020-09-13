@@ -19,6 +19,8 @@ mod boot;
 
 mod mm;
 
+mod locking;
+
 #[no_mangle]
 #[linkage = "external"]
 /// start() is the entry point for kernel code.
