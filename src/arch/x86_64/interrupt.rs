@@ -61,7 +61,6 @@ pub fn init_int(madt: acpi::MADT) {
     }
 
     // pit handler
-    // maybe I fucked this up and handler address non-canonical in terms of IA-32e?
     {
         let mut descriptor: u128 = 0;
         let handler = pit_isr as usize;
@@ -73,8 +72,6 @@ pub fn init_int(madt: acpi::MADT) {
 
         idt[0x20] = descriptor;
     }
-    // yet, deemed insufficient by CPU, raise #GP with 0x202 as error code
-    // maybe this has something to do with a task state segment (or lack thereof)
 
     // Set IDTR
     let idtr = IDTR {
