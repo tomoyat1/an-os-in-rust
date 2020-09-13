@@ -29,7 +29,8 @@ general_protection_fault_isr:
     popq %rcx
     popq %rax
     # we need to pop the CPU-pushed error code here.
-    iret
+    addq %rsp, 8
+    iretq
 
 # 14 Page Fault
 .global page_fault_isr
@@ -58,7 +59,7 @@ page_fault_isr:
     popq %rdx
     popq %rcx
     popq %rax
-    iret
+    iretq
 
 .global ps2_keyboard_isr
 ps2_keyboard_isr:
@@ -86,7 +87,7 @@ ps2_keyboard_isr:
     popq %rdx
     popq %rcx
     popq %rax
-    iret
+    iretq
 
 .global pit_isr
 pit_isr:
@@ -114,7 +115,7 @@ pit_isr:
     popq %rdx
     popq %rcx
     popq %rax
-    iret
+    iretq
 
 .global reload_idt
 reload_idt:
