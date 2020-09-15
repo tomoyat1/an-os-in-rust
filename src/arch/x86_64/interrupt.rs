@@ -1,7 +1,10 @@
 use alloc::vec;
+use core::ptr::write_volatile;
 
 use crate::drivers::acpi;
-use core::ptr::write_volatile;
+use crate::locking;
+use crate::locking::spinlock::WithSpinLock;
+use core::borrow::Borrow;
 
 extern "C" {
     fn page_fault_isr();
@@ -10,6 +13,10 @@ extern "C" {
     fn pit_isr();
     fn reload_idt(idtr: *const IDTR);
 }
+
+static mut IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC { base_addr: 0 });
+
+static mut LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC { base_addr: 0 });
 
 #[repr(C)]
 #[repr(packed)]
@@ -90,6 +97,12 @@ pub fn init_int(madt: acpi::MADT) {
     // Don't consider global interrupt base for now.
     ioapic.remap(lapic.id());
 
+    unsafe {
+        let mut static_ioapic = IOAPIC.lock();
+        *static_ioapic = ioapic;
+        let mut static_lapic = LOCAL_APIC.lock();
+        *static_lapic = lapic;
+    }
 }
 
 #[no_mangle]
@@ -161,18 +174,14 @@ impl IOAPIC {
 
         // Enable interrupts
         unsafe {
-            asm!(
-                "sti"
-            );
+            asm!("sti");
         }
     }
 }
 
 impl LocalAPIC {
     fn new(base_addr: usize) -> Self {
-        Self{
-            base_addr,
-        }
+        Self { base_addr }
     }
 
     /// Get local APIC ID of executing processor.
@@ -183,8 +192,6 @@ impl LocalAPIC {
     /// Read register at index.
     fn read(&self, index: usize) -> u32 {
         let reg = (self.base_addr + index as usize) as *mut u32;
-        unsafe {
-            *reg
-        }
+        unsafe { *reg }
     }
 }
