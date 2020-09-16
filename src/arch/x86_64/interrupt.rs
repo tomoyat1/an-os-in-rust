@@ -14,9 +14,9 @@ extern "C" {
     fn reload_idt(idtr: *const IDTR);
 }
 
-static mut IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC { base_addr: 0 });
+static mut IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC::new(0) );
 
-static mut LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC { base_addr: 0 });
+static mut LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC::new(0));
 
 #[repr(C)]
 #[repr(packed)]
@@ -125,8 +125,10 @@ unsafe extern "C" fn ps2_keyboard_handler() {
 
 #[no_mangle]
 unsafe extern "C" fn pit_handler() {
-    let foo = 1 + 1;
-    /* no-op */
+    // no-op
+    // TODO: Do stuff with tick
+    let mut lapic = LOCAL_APIC.lock();
+    lapic.write(0xb0, 0)
 }
 
 fn mask_pic() {
@@ -141,7 +143,7 @@ fn mask_pic() {
 }
 
 impl IOAPIC {
-    fn new(base_addr: usize) -> Self {
+    const fn new(base_addr: usize) -> Self {
         Self { base_addr }
     }
 
@@ -180,7 +182,7 @@ impl IOAPIC {
 }
 
 impl LocalAPIC {
-    fn new(base_addr: usize) -> Self {
+    const fn new(base_addr: usize) -> Self {
         Self { base_addr }
     }
 
