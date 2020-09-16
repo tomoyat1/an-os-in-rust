@@ -23,8 +23,6 @@ const MASK_38_30: usize = 0x0000007fc0000000;
 /// This also maps memory required for UEFI runtime services so that memory layout matches
 /// what the bootloader set with SetVirtualAddressMap().
 pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
-    malloc::init();
-
     let kernel_pml4 = unsafe { &mut KERNEL_PML4 };
     let boot_pdpt = unsafe { &mut BOOT_PDPT };
 
@@ -55,7 +53,9 @@ pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
     }
 
     // Unmap identity mapping for lower half entrypoint.
-    kernel_pml4[0] = 0;
+    // If we tear this down here, APIC related code which depends on identity mapping does not work.
+
+    // kernel_pdpt[0] = 0;
 
     flush_tlb();
 }

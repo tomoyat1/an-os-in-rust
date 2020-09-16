@@ -7,6 +7,8 @@ reload_gdt:
     movq %r8, %ds
     movq %r8, %es
     movq %r8, %fs
+    movq %r8, %gs
+    movq %r8, %ss
 
     pushq $0x8
     movabsq $reload_cs, %r9

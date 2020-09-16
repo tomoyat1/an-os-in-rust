@@ -1,33 +1,43 @@
 use core::alloc;
 use core::ptr::null_mut;
 
+use crate::KERNEL_BASE;
+
 #[link(name = "boot")]
 extern "C" {
+    // Don't use this for now
     static heap_bottom: usize;
 }
 
 #[global_allocator]
-static mut KERNEL_ALLOCATOR: KernelAllocator = KernelAllocator {
-    heap_bottom: 0,
-    head: 0,
-};
+static mut KERNEL_ALLOCATOR: WithLock<KernelAllocator> = WithLock::<KernelAllocator>::new();
 
 pub struct KernelAllocator {
     heap_bottom: usize,
     head: usize,
 }
 
-pub fn init() {
-    unsafe {
-        let bottom = &heap_bottom as *const usize as usize;
-        KERNEL_ALLOCATOR.heap_bottom = bottom;
-        KERNEL_ALLOCATOR.head = bottom;
+pub struct WithLock<A> {
+    inner: spin::Mutex<A>
+}
+
+impl WithLock<KernelAllocator> {
+    const fn new() -> Self {
+        // Hard-code bottom of heap to KERNEL_BASE + 512MiB
+        let bottom = KERNEL_BASE + (1 << 29);
+        WithLock{
+            inner: spin::Mutex::new(KernelAllocator{
+                heap_bottom: bottom,
+                head:  bottom,
+            })
+        }
     }
 }
 
-unsafe impl alloc::GlobalAlloc for KernelAllocator {
+unsafe impl alloc::GlobalAlloc for WithLock<KernelAllocator> {
     unsafe fn alloc(&self, layout: alloc::Layout) -> *mut u8 {
-        let mut head = self.head as usize;
+        let mut a = self.inner.lock();
+        let mut head = a.head as usize;
         if head == 0 {
             return null_mut();
         }
@@ -37,7 +47,7 @@ unsafe impl alloc::GlobalAlloc for KernelAllocator {
 
         // TODO: consider OOM situations.
         // For now, blindly set head to (align + size)
-        KERNEL_ALLOCATOR.head = head + size;
+        a.head = head + size;
 
         ptr
     }

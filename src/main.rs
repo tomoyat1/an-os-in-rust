@@ -14,8 +14,11 @@ use core::panic::PanicInfo;
 mod arch;
 use arch::x86_64::mm::{init_mm, KERNEL_BASE};
 use arch::x86_64::pm::init_pm;
+use arch::x86_64::interrupt::init_int;
 
 mod boot;
+mod drivers;
+use drivers::acpi;
 
 mod mm;
 
@@ -28,8 +31,11 @@ mod locking;
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
 pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let boot_data = boot::BootData::relocate(boot_data, KERNEL_BASE);
+    let madt = acpi::parse_madt(boot_data.acpi_rsdp)
+        .expect("failed to parse MADT");
     init_mm(boot_data.memory_map); // TODO: error handling
     let gdt = init_pm();
+    init_int(madt);
 
     // let stack_top: *mut u8 = 0xffffffffcfffffff as *mut u8;
     // let stack_top = &mut *stack_top;
@@ -39,7 +45,15 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 
     // Scheduler should not return;
     // panic!("Scheduler has returned when it shouldn't have");
-    loop {}
+    loop {
+        let mut f1 = 1;
+        let mut f2 = 1;
+        for _ in 0..5 {
+            let t = f1 + f2;
+            f1 = f2;
+            f2 = t;
+        }
+    }
 }
 
 #[panic_handler]
