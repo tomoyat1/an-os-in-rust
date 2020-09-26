@@ -18,18 +18,18 @@ pub struct KernelAllocator {
 }
 
 pub struct WithLock<A> {
-    inner: spin::Mutex<A>
+    inner: spin::Mutex<A>,
 }
 
 impl WithLock<KernelAllocator> {
     const fn new() -> Self {
         // Hard-code bottom of heap to KERNEL_BASE + 512MiB
         let bottom = KERNEL_BASE + (1 << 29);
-        WithLock{
-            inner: spin::Mutex::new(KernelAllocator{
+        WithLock {
+            inner: spin::Mutex::new(KernelAllocator {
                 heap_bottom: bottom,
-                head:  bottom,
-            })
+                head: bottom,
+            }),
         }
     }
 }

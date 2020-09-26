@@ -1,10 +1,11 @@
 use alloc::vec;
-use core::ptr::write_volatile;
+use core::borrow::Borrow;
+use core::ptr::{write_volatile, read_volatile};
 
 use crate::drivers::acpi;
 use crate::locking;
 use crate::locking::spinlock::WithSpinLock;
-use core::borrow::Borrow;
+use super::pit;
 
 extern "C" {
     fn page_fault_isr();
@@ -14,9 +15,9 @@ extern "C" {
     fn reload_idt(idtr: *const IDTR);
 }
 
-static mut IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC::new(0) );
+pub static mut IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC::new(0));
 
-static mut LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC::new(0));
+pub static mut LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC::new(0));
 
 #[repr(C)]
 #[repr(packed)]
@@ -25,17 +26,9 @@ struct IDTR {
     base: usize,
 }
 
-struct IOAPIC {
-    base_addr: usize,
-}
-
-struct LocalAPIC {
-    base_addr: usize,
-}
-
 type IDT = vec::Vec<u128>;
 
-pub fn init_int(madt: acpi::MADT) {
+pub fn init(madt: acpi::MADT) {
     let mut idt = vec::Vec::<u128>::with_capacity(40);
     unsafe {
         idt.set_len(40);
@@ -127,6 +120,7 @@ unsafe extern "C" fn ps2_keyboard_handler() {
 unsafe extern "C" fn pit_handler() {
     // no-op
     // TODO: Do stuff with tick
+    pit::pit_tick();
     let mut lapic = LOCAL_APIC.lock();
     lapic.write(0xb0, 0)
 }
@@ -140,6 +134,16 @@ fn mask_pic() {
             out(reg_abcd) _,
         )
     }
+}
+
+/// Masks specified I/O APIC line when mask is true.
+pub fn mask_line(mask: bool, vector: u32) {
+    let ioapic = unsafe { IOAPIC.lock() };
+    ioapic.mask_line(mask, vector);
+}
+
+pub struct IOAPIC {
+    base_addr: usize,
 }
 
 impl IOAPIC {
@@ -156,6 +160,15 @@ impl IOAPIC {
         }
     }
 
+    fn read(&self, index: u32) -> u32 {
+        let ioregsel = self.base_addr as *mut u32;
+        let iowin = (self.base_addr + 0x10) as *mut u32;
+        unsafe {
+            write_volatile(ioregsel, index);
+            read_volatile(iowin)
+        }
+    }
+
     fn remap(&self, lapic_id: u32) {
         // PS/2 keyboard
         self.write(0x12, 0x21);
@@ -164,7 +177,8 @@ impl IOAPIC {
         // PIT
         // The following assumes that PIT is wired to ISA line 0 and remapped to line 2 of I/O APIC
         // TODO: parse MADT for remappings
-        self.write(0x14, 0x20);
+        // Also, we mask PIT until it is properly initialized later.
+        self.write(0x14, 0x10020);
         self.write(0x15, (lapic_id << 24) & 0x0f000000);
 
         // Mouse (masked)
@@ -179,6 +193,21 @@ impl IOAPIC {
             asm!("sti");
         }
     }
+
+    fn mask_line(&self, mask: bool, vector: u32) {
+        let idx = (vector * 2) + 0x10;
+        let redtlb_low = self.read(idx);
+        let redtlb_low = if mask {
+            redtlb_low | 0x10000
+        } else {
+            redtlb_low & 0xfffeffff
+        };
+        self.write(idx, redtlb_low);
+    }
+}
+
+pub struct LocalAPIC {
+    base_addr: usize,
 }
 
 impl LocalAPIC {
@@ -195,5 +224,11 @@ impl LocalAPIC {
     fn read(&self, index: usize) -> u32 {
         let reg = (self.base_addr + index as usize) as *mut u32;
         unsafe { *reg }
+    }
+
+    // Write register at index.
+    fn write(&self, index: usize, value: u32) {
+        let mut reg = (self.base_addr + index as usize) as *mut u32;
+        unsafe { write_volatile(reg, value) }
     }
 }

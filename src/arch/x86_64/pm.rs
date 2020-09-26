@@ -33,7 +33,7 @@ impl From<SegmentDescriptor> for u64 {
     }
 }
 
-pub fn init_pm() -> GDT {
+pub fn init() -> GDT {
     let mut gdt = vec::Vec::with_capacity(8);
     unsafe { gdt.set_len(8) }
     let kernel_code = SegmentDescriptor {

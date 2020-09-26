@@ -4,23 +4,28 @@
 #![feature(linkage)]
 #![feature(asm)]
 #![feature(alloc_error_handler)]
+#![feature(const_fn)]
 
-extern crate rlibc;
 extern crate alloc;
 extern crate bootlib;
+extern crate rlibc;
 
 use core::panic::PanicInfo;
 
 mod arch;
+use arch::x86_64::interrupt;
 use arch::x86_64::mm::{init_mm, KERNEL_BASE};
-use arch::x86_64::pm::init_pm;
-use arch::x86_64::interrupt::init_int;
+use arch::x86_64::pit;
+use arch::x86_64::pm;
 
 mod boot;
 mod drivers;
 use drivers::acpi;
 
 mod mm;
+
+mod kernel;
+use crate::kernel::clock::Clock;
 
 mod locking;
 
@@ -31,15 +36,18 @@ mod locking;
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
 pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let boot_data = boot::BootData::relocate(boot_data, KERNEL_BASE);
-    let madt = acpi::parse_madt(boot_data.acpi_rsdp)
-        .expect("failed to parse MADT");
+    let madt = acpi::parse_madt(boot_data.acpi_rsdp).expect("failed to parse MADT");
     init_mm(boot_data.memory_map); // TODO: error handling
-    let gdt = init_pm();
-    init_int(madt);
+    let gdt = pm::init();
+    interrupt::init(madt);
+    let mut clock = pit::start();
 
     // let stack_top: *mut u8 = 0xffffffffcfffffff as *mut u8;
     // let stack_top = &mut *stack_top;
     // *stack_top = 0xde;
+
+    // Wait for 1000ms
+    clock.sleep(10000);
 
     // Start scheduler
 

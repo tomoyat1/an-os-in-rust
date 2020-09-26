@@ -1,5 +1,5 @@
-use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use core::ffi::c_void;
+use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 
 use uefi::table;
 use uefi::table::boot;
@@ -9,7 +9,7 @@ pub(crate) struct BootData<'a> {
     pub memory_map: &'a [boot::MemoryDescriptor],
     pub framebuffer: RawFramebuffer<'a>,
     pub system_table: &'a table::SystemTable<table::Runtime>,
-    pub acpi_rsdp:  *const c_void,
+    pub acpi_rsdp: *const c_void,
 }
 
 impl<'a> BootData<'a> {

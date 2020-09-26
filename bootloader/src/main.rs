@@ -11,9 +11,9 @@ extern crate uefi_services;
 
 use crate::framebuffer::Framebuffer;
 use alloc::vec::*;
+use core::ffi::c_void;
 use core::fmt::Write;
 use core::ptr;
-use core::ffi::c_void;
 
 use log::info;
 use uefi::prelude::*;
@@ -64,7 +64,6 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
             acpi_rsdp = t.address;
         }
     }
-
 
     // Proceed to bootstrapping the kernel.
     let file = match load_file(&system_table) {

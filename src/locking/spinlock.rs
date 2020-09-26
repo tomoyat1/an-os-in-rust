@@ -1,5 +1,5 @@
 pub struct WithSpinLock<A> {
-    inner: spin::Mutex<A>
+    inner: spin::Mutex<A>,
 }
 
 impl<A> WithSpinLock<A> {
