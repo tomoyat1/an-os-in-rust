@@ -1,9 +1,7 @@
 use alloc::vec;
-use core::borrow::Borrow;
 use core::ptr::{write_volatile, read_volatile};
 
 use crate::drivers::acpi;
-use crate::locking;
 use crate::locking::spinlock::WithSpinLock;
 use super::pit;
 

@@ -1,4 +1,4 @@
-use alloc::{boxed, vec};
+use alloc::vec;
 
 #[link(name = "pm")]
 extern "C" {
@@ -25,9 +25,9 @@ impl From<SegmentDescriptor> for u64 {
         let mut encoded: u64 = 0;
         let base = s.base as u64;
         let ty64 = s.ty as u64;
-        encoded |= ((base & 0xffffff) << 16);
-        encoded |= ((base & 0xff000000) << 32);
-        encoded |= (ty64 << 40);
+        encoded |= (base & 0xffffff) << 16;
+        encoded |= (base & 0xff000000) << 32;
+        encoded |= ty64 << 40;
 
         encoded
     }

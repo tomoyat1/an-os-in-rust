@@ -50,6 +50,7 @@ impl Clock for PIT {
                 in("rax") count,
             )
         }
+        self.mode = clock::Mode::RATE;
     }
 
     fn tick(&mut self) {

@@ -1,8 +1,6 @@
-use alloc::vec;
 use uefi::table::boot;
 
 use crate::mm::malloc;
-use uefi::table::boot::MemoryDescriptor;
 
 extern "C" {
     #[link_name = "boot_pml4"]

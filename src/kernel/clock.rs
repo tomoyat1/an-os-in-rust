@@ -1,7 +1,7 @@
 pub(crate) enum Mode {
     UNINITIALIZED,
     ONESHOT,
-    LOOP,
+    RATE,
 }
 
 pub trait Clock {
@@ -15,6 +15,7 @@ pub trait Clock {
         let start = self.get_count();
         let end = start + milliseconds;
         while self.get_count() < end {
+            // TODO: Once we have a scheduler, context switch to next runnable thread.
             unsafe {
                 asm!("hlt");
             }
