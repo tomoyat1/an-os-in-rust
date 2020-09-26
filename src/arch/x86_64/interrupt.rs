@@ -1,15 +1,16 @@
 use alloc::vec;
-use core::ptr::{write_volatile, read_volatile};
+use core::ptr::{read_volatile, write_volatile};
 
-use crate::drivers::acpi;
-use crate::locking::spinlock::WithSpinLock;
 use super::pit;
+use crate::drivers::{acpi, serial};
+use crate::locking::spinlock::WithSpinLock;
 
 extern "C" {
     fn page_fault_isr();
     fn general_protection_fault_isr();
     fn ps2_keyboard_isr();
     fn pit_isr();
+    fn com0_isr();
     fn reload_idt(idtr: *const IDTR);
 }
 
@@ -32,6 +33,8 @@ pub fn init(madt: acpi::MADT) {
         idt.set_len(40);
     }
 
+    // Set up each fault and IRQ handler.
+    // TODO: make IRQ handlers pluggable from outside this module.
     // page fault handler
     {
         let mut descriptor: u128 = 0;
@@ -69,6 +72,19 @@ pub fn init(madt: acpi::MADT) {
         descriptor |= 8 << 44; // Present flag
 
         idt[0x20] = descriptor;
+    }
+
+    // serial port handler
+    {
+        let mut descriptor: u128 = 0;
+        let handler = com0_isr as usize;
+        descriptor |= (handler & 0xffff) as u128; // offset 15:0
+        descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
+        descriptor |= 0x8 << 16; // segment selector
+        descriptor |= 0xe << 40; // type: 0b1110
+        descriptor |= 8 << 44; // Present flag
+
+        idt[0x24] = descriptor;
     }
 
     // Set IDTR
@@ -111,6 +127,8 @@ unsafe extern "C" fn page_fault_handler() {
 #[no_mangle]
 unsafe extern "C" fn ps2_keyboard_handler() {
     let foo = 1 + 1;
+    let mut lapic = LOCAL_APIC.lock();
+    lapic.write(0xb0, 0)
     /* no-op */
 }
 
@@ -119,6 +137,13 @@ unsafe extern "C" fn pit_handler() {
     // no-op
     // TODO: Do stuff with tick
     pit::pit_tick();
+    let mut lapic = LOCAL_APIC.lock();
+    lapic.write(0xb0, 0)
+}
+
+#[no_mangle]
+unsafe extern "C" fn com0_handler() {
+    serial::read_com1();
     let mut lapic = LOCAL_APIC.lock();
     lapic.write(0xb0, 0)
 }
@@ -178,6 +203,10 @@ impl IOAPIC {
         // Also, we mask PIT until it is properly initialized later.
         self.write(0x14, 0x10020);
         self.write(0x15, (lapic_id << 24) & 0x0f000000);
+
+        // COM 1, 3
+        self.write(0x18, 0x24);
+        self.write(0x19, (lapic_id << 24) & 0x0f000000);
 
         // Mouse (masked)
         self.write(0x28, 0x100FF);

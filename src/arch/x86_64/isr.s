@@ -63,6 +63,7 @@ page_fault_isr:
 
 .global ps2_keyboard_isr
 ps2_keyboard_isr:
+    cli
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -87,10 +88,12 @@ ps2_keyboard_isr:
     popq %rdx
     popq %rcx
     popq %rax
+    sti
     iretq
 
 .global pit_isr
 pit_isr:
+    cli
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -115,6 +118,37 @@ pit_isr:
     popq %rdx
     popq %rcx
     popq %rax
+    sti
+    iretq
+
+.global com0_isr
+com0_isr:
+    cli
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rdi
+    pushq %rsi
+    pushq %rbp
+    pushq %rsp
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call com0_handler
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rsp
+    popq %rbp
+    popq %rsi
+    popq %rdi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    sti
     iretq
 
 .global reload_idt
