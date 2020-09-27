@@ -1,4 +1,5 @@
 use super::interrupt;
+use super::port;
 use crate::kernel::clock;
 use crate::kernel::clock::Clock;
 use crate::locking::spinlock::WithSpinLock;
@@ -37,18 +38,9 @@ impl Clock for PIT {
         let count: u16 = 1193; // Close enough to 1ms period
         let control: u16 = 0b00110100; // chan 0; lobyte/hibyte; rate generator; 16-bit binary
         unsafe {
-            asm!(
-                "out {mode_cmd}, al",
-                mode_cmd = const MODE_CMD,
-                in("rax") control,
-            );
-            asm!(
-                "out {chan0}, al",
-                "mov al, ah",
-                "out {chan0}, al",
-                chan0 = const CHAN0_DATA,
-                in("rax") count,
-            )
+            port::outb(MODE_CMD as u16, control as u8);
+            port::outb(CHAN0_DATA as u16, count as u8);
+            port::outb(CHAN0_DATA as u16, (count >> 8) as u8);
         }
         self.mode = clock::Mode::RATE;
     }
