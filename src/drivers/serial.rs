@@ -23,12 +23,11 @@ pub fn tmp_write_com1(c: u8) {
     match com1 {
         Some(com1) => {
             while com1.line_status() & 0b01000000 == 0 {
-                let foo = 1 + 1;
+                core::sync::atomic::spin_loop_hint();
             }
-            com1.outb(0, c);
+            com1.write_byte(c);
         },
         None => {}
-
     }
 }
 
@@ -39,8 +38,11 @@ pub fn read_com1() {
         match com1 {
             Some(com1) => {
                 while com1.line_status() & 0x1 == 1 {
-                    let data = com1.inb(0);
-                    com1.outb(0, data as u8)
+                    let data = com1.read_byte();
+                    // TODO: read byte into the driver's buffer instead of writing it out.
+                    //       deciding to write the byte out should be the job of whoever gets the
+                    //       byte from the buffer.
+                    com1.write_byte(data as u8)
                 }
             },
             None => {}
@@ -50,6 +52,8 @@ pub fn read_com1() {
 
 pub struct Com {
     port: u16,
+    // TODO: Add read and write buffers. Keep in mind that these will be accessed in IRQ context, so
+    //       task switching while manipulating them is a big no-no.
 }
 
 impl Com {
@@ -74,19 +78,39 @@ impl Com {
         com
     }
 
-    fn inb(&self, offset: u16) -> u16 {
+    fn inb(&self, offset: u16) -> u8 {
         unsafe {
-            port::inb(self.port + offset) as u16
+            port::inb(self.port + offset)
         }
     }
 
-    pub fn outb(&self, offset: u16, data: u8) {
+    fn outb(&self, offset: u16, data: u8) {
         unsafe {
             port::outb(self.port + offset, data);
         }
     }
 
-    fn line_status(&self) -> u16 {
+    fn line_status(&self) -> u8 {
         self.inb(5)
+    }
+
+    /// Writes `byte` to serial port `self`
+    ///
+    /// ## TODO
+    /// - This should be abstracted as a character device down the road.
+    /// - Add a buffer to store bytes until port is ready for more data. Drop further outgoing data
+    ///   if this buffer is full.
+    pub fn write_byte(&self, byte: u8) {
+        self.outb(0, byte);
+    }
+
+    /// Reads a byte from serial port `self`
+    ///
+    /// ## TODO
+    /// - This should be abstracted as a character device down the road.
+    /// - Add a buffer to store bytes until read by this methods. Drop further incoming data if this
+    ///   buffer is full.
+    pub fn read_byte(&self) -> u8 {
+        self.inb(0) as u8
     }
 }
