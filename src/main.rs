@@ -51,12 +51,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Wait for 1000ms
     clock.sleep(10000);
 
-    // This deadlock with the interrupt handler, which is pretty much constantly firing.
-    // TODO: make tmp_write_com1 just write to a buffer and asynchronously handle io in the driver.
-    serial::tmp_write_com1('D' as u8);
-    serial::tmp_write_com1('o' as u8);
-    serial::tmp_write_com1('n' as u8);
-    serial::tmp_write_com1('e' as u8);
+    serial::tmp_write_com1(b"Done");
 
     // Start scheduler
 
