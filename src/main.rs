@@ -21,6 +21,7 @@ use arch::x86_64::pm;
 mod boot;
 mod drivers;
 use drivers::acpi;
+use drivers::net::rtl8139;
 use drivers::serial;
 
 mod mm;
@@ -49,9 +50,17 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // *stack_top = 0xde;
 
     // Wait for 1000ms
-    clock.sleep(10000);
+    clock.sleep(1000);
 
     serial::tmp_write_com1(b"Done");
+
+    // Initialize PCI devices
+    let found = rtl8139::init();
+    if found {
+        serial::tmp_write_com1(b"\r\nRTL8139 FOUND\r\n")
+    } else {
+        serial::tmp_write_com1(b"\r\nNO NIC\r\n")
+    }
 
     // Start scheduler
 
