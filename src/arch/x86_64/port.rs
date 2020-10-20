@@ -16,6 +16,14 @@ pub unsafe fn inb(port: u16) -> u8 {
     val as u8
 }
 
+pub unsafe fn outw(port: u16, data: u16) {
+    asm!(
+    "out dx, ax",
+    in("rdx") port,
+    in("rax") data as u16,
+    )
+}
+
 pub unsafe fn outl(port: u16, data: u32) {
     asm!(
     "out dx, eax",
