@@ -10,6 +10,7 @@ extern crate alloc;
 extern crate bootlib;
 extern crate rlibc;
 
+use core::fmt::Write;
 use core::panic::PanicInfo;
 
 mod arch;
@@ -56,13 +57,16 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     serial::tmp_write_com1(b"Done");
 
     // Initialize PCI devices
-    let pci = pci::init();
-    let nics = rtl8139::init(&pci);
+    let mut pci = pci::init();
+    let nics = rtl8139::init(&mut pci);
     if nics.len() == 1 {
-        serial::tmp_write_com1(b"\r\nRTL8139 FOUND\r\n")
+        serial::tmp_write_com1(b"\r\nRTL8139 FOUND\r\n");
+        let nic = &nics[0];
+        writeln!(serial::Handle, "BAR len: {:x}", nic.pci.bar1);
     } else {
         serial::tmp_write_com1(b"\r\nNO NIC\r\n")
     }
+
 
     // Start scheduler
 

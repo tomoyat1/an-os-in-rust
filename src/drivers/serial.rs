@@ -160,3 +160,30 @@ impl Com {
         Ok(())
     }
 }
+
+impl core::fmt::Write for WithSpinLock<Option<Com>> {
+    fn write_str(&mut self, s: &str) -> Result<(), core::fmt::Error> {
+        let com = self.lock();
+        let com = com.as_ref();
+        if let Some(com) = com {
+            match com.write_all(s.as_bytes()) {
+                Ok(()) => Ok(()),
+                Err(()) => Err(core::fmt::Error)
+            }
+        } else {
+            Err(core::fmt::Error)
+        }
+    }
+}
+
+// Handle to expose WithSpinLock<Com> to outside of this module for use with write_ln!.
+// This is just for experimentation. Final interface is to be designed
+pub struct Handle;
+
+impl core::fmt::Write for Handle {
+    fn write_str(&mut self, s: &str) -> Result<(), core::fmt::Error> {
+        unsafe {
+            COM1.write_str(s)
+        }
+    }
+}
