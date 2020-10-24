@@ -114,7 +114,9 @@ impl RTL8139<'_> {
         }
 
         // Enable transmitter and receiver.
-        // TODO: actually do this.
+        unsafe {
+            rtl8139.outl(REG_COMMAND, 0x0c);
+        }
 
         Ok(rtl8139)
     }
