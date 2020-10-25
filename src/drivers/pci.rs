@@ -45,6 +45,49 @@ pub struct PCIDevice {
     subsystem_vendor_id: u16,
 }
 
+impl PCIDevice {
+    unsafe fn outl(&self, offset: u16, function: u32, data: u32) {
+        let n_bus = self.bus_number as u32;
+        let n_device = self.device_number as u32;
+        let function: u32 = (function & 0b111) << 8;
+        let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | offset as u32;
+
+        // Set register to write to.
+        port::outl(0xcf8, cfg_addr);
+
+        // Actually write.
+        port::outl(0xcfc, data)
+    }
+
+    unsafe fn inl(&self, offset: u16, function: u32) -> u32 {
+        let n_bus = self.bus_number as u32;
+        let n_device = self.device_number as u32;
+        let function: u32 = (function & 0b111) << 8;
+        let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | offset as u32;
+
+        // Set register to write to.
+        port::outl(0xcf8, cfg_addr);
+
+        // Actually read.
+        port::inl(0xcfc)
+    }
+
+    pub fn read_control_register(&self, function: u32) -> u16 {
+        let read = unsafe {
+            self.inl(0x4, function)
+        };
+        (read & 0x0000FFFF) as u16
+    }
+
+    pub fn write_control_register(&self, control: u16, function: u32) {
+        let status: u32 = 0x0 << 16;
+        let data = status | control as u32;
+        unsafe {
+            self.outl(0x4, function, data)
+        }
+    }
+}
+
 /// Enumerates PCI bus for devices.
 fn enumerate_pci_bus() -> Vec<PCIDevice> {
     let mut devices = Vec::<PCIDevice>::new();
