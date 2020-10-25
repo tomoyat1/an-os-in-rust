@@ -66,9 +66,9 @@ impl RTL8139<'_> {
             rx_buf,
         };
 
-        // Enable PCI bus mastering
-        // TODO: do this.
-        //       Also, abstract PCI configuration space register R/W operations in PCI module.
+        // Enable bus mastering. This lets PCI device to perform DMA.
+        // Assume that everything is set to 0 after PCI device RST#.
+        rtl8139.pci.write_control_register(0b0000000000000100, 0);
 
         // Power on device
         unsafe {
