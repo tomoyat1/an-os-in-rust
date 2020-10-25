@@ -151,6 +151,36 @@ com0_isr:
     sti
     iretq
 
+.global rtl8139_isr
+rtl8139_isr:
+    cli
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rdi
+    pushq %rsi
+    pushq %rbp
+    pushq %rsp
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    cld
+    call rtl8139_handler
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rsp
+    popq %rbp
+    popq %rsi
+    popq %rdi
+    popq %rdx
+    popq %rcx
+    popq %rax
+    sti
+    iretq
+
 .global reload_idt
 reload_idt:
     lidt 0(%rdi)
