@@ -76,9 +76,10 @@ impl RTL8139<'_> {
         };
 
         // Software Reset
+        // TODO: debug infinite loop here. What is thought to be the command register never gets low.
         unsafe  {
-            rtl8139.outb(REG_RBSTART, 0x10);
-            while rtl8139.inb(REG_RBSTART) & 0x10 != 0 {
+            rtl8139.outb(REG_COMMAND, 0x10);
+            while rtl8139.inb(REG_COMMAND) & 0x10 != 0 {
                 spin_loop_hint();
             }
         };
@@ -132,7 +133,7 @@ impl RTL8139<'_> {
     }
 
     unsafe fn inb(&self, offset: u16) -> u8 {
-        port::inb(self.ioaddr(offset) + offset)
+        port::inb(self.ioaddr(offset))
     }
 
     unsafe fn outw(&self, offset: u16, data: u16) {
@@ -142,7 +143,7 @@ impl RTL8139<'_> {
     unsafe fn outl(&self, offset: u16, data: u32) {
         // Assume here that bar1 contains an IO port addr.
         // TODO: support memory mapped registers.
-        port::outl(self.ioaddr(offset) + offset, data)
+        port::outl(self.ioaddr(offset), data)
     }
 }
 
@@ -151,3 +152,8 @@ impl RTL8139<'_> {
 //       1. Figure out what kind of event woke us up by reading the interrupt status register.
 //       2. Handle the event.
 //       3. Clear the corresponding bit in the interrupt status reg.
+
+#[no_mangle]
+pub fn rtl8139_handler() {
+    let two = 1 + 1;
+}

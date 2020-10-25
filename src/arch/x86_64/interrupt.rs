@@ -11,6 +11,7 @@ extern "C" {
     fn ps2_keyboard_isr();
     fn pit_isr();
     fn com0_isr();
+    fn rtl8139_isr();
     fn reload_idt(idtr: *const IDTR);
 }
 
@@ -27,7 +28,7 @@ struct IDTR {
 
 type IDT = vec::Vec<u128>;
 
-pub fn init(madt: acpi::MADT) {
+pub fn init(madt: acpi::MADT) -> u32 {
     let mut idt = vec::Vec::<u128>::with_capacity(40);
     unsafe {
         idt.set_len(40);
@@ -87,6 +88,19 @@ pub fn init(madt: acpi::MADT) {
         idt[0x24] = descriptor;
     }
 
+    // rtl8139 MSI interrupt
+    {
+        let mut descriptor: u128 = 0;
+        let handler = rtl8139_isr as usize;
+        descriptor |= (handler & 0xffff) as u128; // offset 15:0
+        descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
+        descriptor |= 0x8 << 16; // segment selector
+        descriptor |= 0xe << 40; // type: 0b1110
+        descriptor |= 8 << 44; // Present flag
+
+        idt[0x26] = descriptor;
+    }
+
     // Set IDTR
     let idtr = IDTR {
         limit: 40 * 16 - 1,
@@ -102,7 +116,8 @@ pub fn init(madt: acpi::MADT) {
     let lapic = LocalAPIC::new(madt.lapic_addr);
     let ioapic = IOAPIC::new(madt.ioapic_addr);
     // Don't consider global interrupt base for now.
-    ioapic.remap(lapic.id());
+    let lapic_id = lapic.id();
+    ioapic.remap(lapic_id);
 
     unsafe {
         let mut static_ioapic = IOAPIC.lock();
@@ -110,6 +125,8 @@ pub fn init(madt: acpi::MADT) {
         let mut static_lapic = LOCAL_APIC.lock();
         *static_lapic = lapic;
     }
+
+    lapic_id
 }
 
 #[no_mangle]

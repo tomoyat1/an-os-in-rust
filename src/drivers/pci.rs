@@ -3,9 +3,15 @@ use core::num::Wrapping;
 
 use crate::arch::x86_64::port;
 
-pub fn init() -> PCI {
+const REG_CAP_PTR: u16 = 0x34;
+
+// Interrupt vector for RTL8139 MSI. This should be configured per-device
+// per-device, but we go with a hard-coded constant for simplicity for the time being.
+const MSI_VECTOR: u32 = 0x26;
+
+pub fn init(lapic_id: u32) -> PCI {
     PCI {
-        devices: enumerate_pci_bus(),
+        devices: enumerate_pci_bus(lapic_id),
     }
 }
 
@@ -43,6 +49,8 @@ pub struct PCIDevice {
     pub(crate) bar5: usize,
     subsystem_id: u16,
     subsystem_vendor_id: u16,
+
+    msi_capability_pointer: Option<u16>,
 }
 
 impl PCIDevice {
@@ -86,13 +94,21 @@ impl PCIDevice {
             self.outl(0x4, function, data)
         }
     }
+
+    pub fn read_status_register(&self, function: u32) -> u16 {
+        let read = unsafe {
+            self.inl(0x4, function)
+        };
+        ((read & 0xffff0000) >> 16) as u16
+    }
 }
 
 /// Enumerates PCI bus for devices.
-fn enumerate_pci_bus() -> Vec<PCIDevice> {
+fn enumerate_pci_bus(lapic_id: u32) -> Vec<PCIDevice> {
     let mut devices = Vec::<PCIDevice>::new();
     for n_bus in 0..255 as u32 {
         for n_device in 0..32 as u32 {
+            // We assume single function devices for now.
             let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11;
             let cfg_data = unsafe {
                 port::outl(0xcf8, cfg_addr);
@@ -130,7 +146,7 @@ fn enumerate_pci_bus() -> Vec<PCIDevice> {
                 port::outl(0xcfc, orig_bar);
             }
 
-            devices.push(PCIDevice {
+            let mut device =  PCIDevice {
                 bus_number: n_bus as u16,
                 device_number: n_device as u16,
                 vendor_id,
@@ -144,7 +160,46 @@ fn enumerate_pci_bus() -> Vec<PCIDevice> {
                 bar5: 0,
                 subsystem_id: 0,
                 subsystem_vendor_id: 0,
-            });
+                msi_capability_pointer: None,
+            };
+
+            // Look for MSI capbility struture
+            // TODO: generalize this to enumerate all capabilities in the future.
+            let status = device.read_status_register(0);
+            if status & 0b10000 != 0 {
+                let mut ptr = REG_CAP_PTR;
+                while ptr != 0 {
+                    let (ctrl, n_ptr, cap_id) = {
+                        let v = unsafe {
+                            device.inl(ptr, 0)
+                        };
+                        ((v & 0xffff0000) >> 16, (v & 0xff00) >> 8, v & 0xff)
+                    };
+                    if cap_id != 0x05 {
+                        ptr = n_ptr as u16;
+                        continue
+                    }
+                    device.msi_capability_pointer = Some(ptr);
+
+                    // enable MSI
+                    unsafe {device.outl(ptr, 0x0, 0x1);};
+
+                    // Set message address. Just use 32 bit address for now.
+                    let dest_id: u32 = lapic_id << 12;
+                    let addr: u32 = 0xfee00000 | dest_id | (0b00 << 2);
+                    unsafe { device.outl(ptr + 0x4, 0, addr)}
+
+                    // Set message data.
+                    let data: u32 = MSI_VECTOR; // edge triggered, fixed delivery mode
+                    unsafe { device.outl(ptr + 0x8, 0, data)}
+
+                    break
+                }
+            }
+
+
+
+            devices.push(device);
         }
     }
 
