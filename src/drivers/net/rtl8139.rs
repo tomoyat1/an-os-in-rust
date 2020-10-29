@@ -124,7 +124,9 @@ impl RTL8139<'_> {
 
     #[inline]
     fn ioaddr(&self, offset: u16) ->  u16 {
-        let base =  (self.pci.bar1 ^ 0x1) as u16;
+        // If calls to pci.read_bar1() get to slow we should cache the addr in RAM.
+        // RTL8139 driver should own the cached field.
+        let base =  (self.pci.read_bar1(0) & !0xf) as u16;
         base + offset
     }
 
