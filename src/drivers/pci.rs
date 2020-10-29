@@ -23,7 +23,8 @@ impl PCI {
     pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<&mut PCIDevice> {
         let vendor_id = vendor_id;
         let device_id = device_id;
-        let iter = self.devices
+        let iter = self
+            .devices
             .iter_mut()
             .filter(move |x| x.vendor_id == vendor_id && x.device_id == device_id);
         let mut v = Vec::<&mut PCIDevice>::new();
@@ -42,11 +43,6 @@ pub struct PCIDevice {
 
     device_id: u16,
     vendor_id: u16,
-    pub(crate) bar1: usize,
-    pub(crate) bar2: usize,
-    pub(crate) bar3: usize,
-    pub(crate) bar4: usize,
-    pub(crate) bar5: usize,
     subsystem_id: u16,
     subsystem_vendor_id: u16,
 
@@ -81,25 +77,27 @@ impl PCIDevice {
     }
 
     pub fn read_control_register(&self, function: u32) -> u16 {
-        let read = unsafe {
-            self.inl(0x4, function)
-        };
+        let read = unsafe { self.inl(0x4, function) };
         (read & 0x0000FFFF) as u16
     }
 
     pub fn write_control_register(&self, control: u16, function: u32) {
         let status: u32 = 0x0 << 16;
         let data = status | control as u32;
-        unsafe {
-            self.outl(0x4, function, data)
-        }
+        unsafe { self.outl(0x4, function, data) }
     }
 
     pub fn read_status_register(&self, function: u32) -> u16 {
-        let read = unsafe {
-            self.inl(0x4, function)
-        };
+        let read = unsafe { self.inl(0x4, function) };
         ((read & 0xffff0000) >> 16) as u16
+    }
+
+    pub fn read_bar1(&self, function: u32) -> u32 {
+        unsafe { self.inl(0x10, function) }
+    }
+
+    pub fn write_bar1(&self, function: u32, data: u32) {
+        unsafe { self.outl(0x10, function, data) }
     }
 }
 
@@ -123,41 +121,13 @@ fn enumerate_pci_bus(lapic_id: u32) -> Vec<PCIDevice> {
             let vendor_id = (cfg_data & 0xffff) as u16;
             let device_id = ((cfg_data & 0xffff0000) >> 16) as u16;
 
-            // BAR 1
-            let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | 0x10 as u32;
-
-            // Save original BAR contents
-            let orig_bar = unsafe {
-                port::outl(0xcf8, cfg_addr);
-                port::inl(0xcfc)
-            };
-
-            // Write all 1's to BAR and get encoded required space.
-            // let buf_size = unsafe {
-            //     port::outl(0xcfc, 0xffffffff);
-            //     port::inl(0xcfc)
-            // };
-
-            // Decode required space.
-            // let buf_size = !Wrapping(buf_size) + Wrapping(1);
-
-            // Restore original BAR contents
-            unsafe {
-                port::outl(0xcfc, orig_bar);
-            }
-
-            let mut device =  PCIDevice {
+            let mut device = PCIDevice {
                 bus_number: n_bus as u16,
                 device_number: n_device as u16,
                 vendor_id,
                 device_id,
 
                 // TODO: properly fill in these fields, and possibly more.
-                bar1: orig_bar as usize,
-                bar2: 0,
-                bar3: 0,
-                bar4: 0,
-                bar5: 0,
                 subsystem_id: 0,
                 subsystem_vendor_id: 0,
                 msi_capability_pointer: None,
@@ -170,34 +140,32 @@ fn enumerate_pci_bus(lapic_id: u32) -> Vec<PCIDevice> {
                 let mut ptr = REG_CAP_PTR;
                 while ptr != 0 {
                     let (ctrl, n_ptr, cap_id) = {
-                        let v = unsafe {
-                            device.inl(ptr, 0)
-                        };
+                        let v = unsafe { device.inl(ptr, 0) };
                         ((v & 0xffff0000) >> 16, (v & 0xff00) >> 8, v & 0xff)
                     };
                     if cap_id != 0x05 {
                         ptr = n_ptr as u16;
-                        continue
+                        continue;
                     }
                     device.msi_capability_pointer = Some(ptr);
 
                     // enable MSI
-                    unsafe {device.outl(ptr, 0x0, 0x1);};
+                    unsafe {
+                        device.outl(ptr, 0x0, 0x1);
+                    };
 
                     // Set message address. Just use 32 bit address for now.
                     let dest_id: u32 = lapic_id << 12;
                     let addr: u32 = 0xfee00000 | dest_id | (0b00 << 2);
-                    unsafe { device.outl(ptr + 0x4, 0, addr)}
+                    unsafe { device.outl(ptr + 0x4, 0, addr) }
 
                     // Set message data.
                     let data: u32 = MSI_VECTOR; // edge triggered, fixed delivery mode
-                    unsafe { device.outl(ptr + 0x8, 0, data)}
+                    unsafe { device.outl(ptr + 0x8, 0, data) }
 
-                    break
+                    break;
                 }
             }
-
-
 
             devices.push(device);
         }
