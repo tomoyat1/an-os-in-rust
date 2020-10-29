@@ -66,9 +66,8 @@ impl RTL8139<'_> {
             rx_buf,
         };
 
-        // Enable bus mastering. This lets PCI device to perform DMA.
-        // Assume that everything is set to 0 after PCI device RST#.
-        rtl8139.pci.write_control_register(0b0000000000000100, 0);
+        // Enable bus mastering and IOEN. This lets PCI device to perform DMA.
+        rtl8139.pci.write_control_register(0x0005, 0);
 
         // Power on device
         unsafe {
@@ -76,7 +75,6 @@ impl RTL8139<'_> {
         };
 
         // Software Reset
-        // TODO: debug infinite loop here. What is thought to be the command register never gets low.
         unsafe  {
             rtl8139.outb(REG_COMMAND, 0x10);
             while rtl8139.inb(REG_COMMAND) & 0x10 != 0 {
