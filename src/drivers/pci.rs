@@ -19,6 +19,8 @@ pub struct PCI {
     devices: Vec<PCIDevice>,
 }
 
+// Note: An instance of PCI that is static mut should exist. See comment in rtl8139 driver code.
+
 impl PCI {
     pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<&mut PCIDevice> {
         let vendor_id = vendor_id;
