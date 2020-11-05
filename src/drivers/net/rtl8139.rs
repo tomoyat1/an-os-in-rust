@@ -82,13 +82,6 @@ impl RTL8139<'_> {
             }
         };
 
-        // Set up interrupts.
-        // 0x0005 sets the ROK and TOK bits, which means we get interrupts when successfully
-        // send or receive packets.
-        unsafe {
-            rtl8139.outw(REG_IMR, 0x0005);
-        }
-
         // Init recv buffer
         // TODO: get physical address of rx_buf. This will require additions to virtual mem code.
         let not_rx_buf_addr = rtl8139.rx_buf.as_ptr();
@@ -116,6 +109,14 @@ impl RTL8139<'_> {
         unsafe {
             rtl8139.outl(REG_COMMAND, 0x0c);
         }
+
+        // Set up interrupts.
+        // 0x0005 sets the ROK and TOK bits, which means we get interrupts when successfully
+        // send or receive packets.
+        unsafe {
+            rtl8139.outw(REG_IMR, 0x0005);
+        }
+
 
         Ok(rtl8139)
     }
@@ -147,12 +148,25 @@ impl RTL8139<'_> {
     }
 }
 
+
+// Note: The struct which represents a single RTL8139 can solely own all the data related to it.
+//       It should be put behind a WithSpinLock<T> or better another locking structure with queuing semantics
+//       so that both upper-half and lower-half can access it, but not simultaneously (locking structs imply RefCell<T>)
+//
+//       The IRQ handler should not be a static Fn but a heap-allocated closure containing the call to the RTL8139{}
+//       method. For each initialized RTL8139 a closure should be heap-allocated and it's address (function pointer)
+//       should be registered to the entity that owns the IRQ number.
+//
+//       The IRQ number should be owned by the PCI driver. The PCI driver should also have a 'static lifetime
+//       so that the IRQ handling function can reference it (in turn the IRQ handling function needs to be a 'static Fn
+//       so that the IRQ hander asm shim can link to it :rolling_eyes:)
+
 // TODO: write actual code for ISR handler.
 //       This function should
 //       1. Figure out what kind of event woke us up by reading the interrupt status register.
 //       2. Handle the event.
 //       3. Clear the corresponding bit in the interrupt status reg.
-
+// This should be per-rtl8139 instead of a single shared public func.
 #[no_mangle]
 pub fn rtl8139_handler() {
     let two = 1 + 1;
