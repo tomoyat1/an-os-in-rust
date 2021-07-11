@@ -56,8 +56,8 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     serial::tmp_write_com1(b"Done");
 
     // Initialize PCI devices
-    let mut pci = pci::init(lapic_id);
-    let nics = rtl8139::init(&mut pci);
+    pci::init(lapic_id);
+    let nics = rtl8139::init();
     if nics.len() == 1 {
         serial::tmp_write_com1(b"\r\nRTL8139 FOUND\r\n");
         let nic = &nics[0];
