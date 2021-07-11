@@ -4,6 +4,7 @@ use core::sync::atomic::spin_loop_hint;
 use crate::drivers::pci;
 use crate::drivers::pci::PCIDevice;
 use crate::arch::x86_64::port;
+use crate::locking::spinlock::WithSpinLock;
 
 /// Vendor ID of Realtek
 const RTL8139_VENDOR_ID: u16 = 0x10ec;
@@ -23,22 +24,36 @@ const REG_IMR: u16 = 0x3c;
 
 const REG_RCR: u16 = 0x44;
 
+// We will not make individual PCI devices 'static
+static mut THE_RTL8139: WithSpinLock<Option<RTL8139>> = WithSpinLock::new(None);
+
 /// Initializes all RTL8139s on the PCI bus.
-pub fn init(pci: &mut pci::PCI) -> Vec<RTL8139>{
+pub fn init(pci: &mut pci::PCI) -> Vec<*RTL8139>{
     let devices = pci.get_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
-    let mut v = Vec::<RTL8139>::new();
+    let mut v = Vec::<*RTL8139>::new();
 
     for pci_dev in devices {
         {
             match RTL8139::init(pci_dev) {
                 Ok(rtl8139) => {
-                    v.push(rtl8139)
+                    v.push(&rtl8139)
                 }, Err(()) => {
                     continue
                 }
             }
         }
     };
+    if v.len() == 1 {
+        let rtl8139 = unsafe { THE_RTL8139.lock()};
+        match rtl8139.as_ref() {
+            Some(_) => {
+                 panic!("RTL8139 was initialized before initialization");
+            },
+            None => {
+                // *rtl8139 = Some(*v[0]); // This will not work because PCIDevice is not 'static.
+            }
+        }
+    }
     v
 }
 
