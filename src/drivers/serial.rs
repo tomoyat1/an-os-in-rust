@@ -178,6 +178,9 @@ impl core::fmt::Write for WithSpinLock<Option<Com>> {
 
 // Handle to expose WithSpinLock<Com> to outside of this module for use with write_ln!.
 // This is just for experimentation. Final interface is to be designed
+// Think about abstraction for singletons (for objects that control a shared hardware resource)
+// (serial, PCI ...)
+// Like, a queue of requests to the singleton
 pub struct Handle;
 
 impl core::fmt::Write for Handle {

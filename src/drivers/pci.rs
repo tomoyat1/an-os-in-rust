@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 use core::num::Wrapping;
 
 use crate::arch::x86_64::port;
+use crate::locking::spinlock::WithSpinLock;
 
 const REG_CAP_PTR: u16 = 0x34;
 
@@ -9,9 +10,15 @@ const REG_CAP_PTR: u16 = 0x34;
 // per-device, but we go with a hard-coded constant for simplicity for the time being.
 const MSI_VECTOR: u32 = 0x26;
 
-pub fn init(lapic_id: u32) -> PCI {
-    PCI {
+static mut PCI: WithSpinLock<Option<PCI>> = WithSpinLock::new(None);
+
+pub fn init(lapic_id: u32) {
+    let p = PCI {
         devices: enumerate_pci_bus(lapic_id),
+    };
+    unsafe {
+        let mut pci = PCI.lock();
+        *pci = Some(p);
     }
 }
 
@@ -174,4 +181,26 @@ fn enumerate_pci_bus(lapic_id: u32) -> Vec<PCIDevice> {
     }
 
     return devices;
+}
+
+impl WithSpinLock<Option<PCI>> {
+    pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<&mut PCIDevice> {
+        let mut pci = unsafe { self.lock() };
+        let pci = pci.as_mut();
+        if let Some(pci) = pci {
+            pci.get_device(vendor_id, device_id)
+        } else {
+            alloc::vec!()
+        }
+    }
+}
+
+pub struct Handle;
+
+impl Handle {
+    pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<&mut PCIDevice> {
+        unsafe {
+            PCI.get_device(vendor_id, device_id)
+        }
+    }
 }

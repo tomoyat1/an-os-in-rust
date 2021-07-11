@@ -24,9 +24,9 @@ const REG_IMR: u16 = 0x3c;
 const REG_RCR: u16 = 0x44;
 
 /// Initializes all RTL8139s on the PCI bus.
-pub fn init(pci: &mut pci::PCI) -> Vec<RTL8139>{
-    let devices = pci.get_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
-    let mut v = Vec::<RTL8139>::new();
+pub fn init() -> Vec<RTL8139<'static>> {
+    let devices = pci::Handle.get_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
+    let mut v = Vec::<RTL8139<'static>>::new();
 
     for pci_dev in devices {
         {
