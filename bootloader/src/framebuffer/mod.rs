@@ -36,7 +36,7 @@ impl<'gop> Framebuffer<'gop> {
         let gop = bs
             .locate_protocol::<GraphicsOutput>()
             .expect("Graphics Output Protocol support is required!");
-        let gop = gop.expect("warnings occurred when opening GOP");
+        // let gop = gop.expect("warnings occurred when opening GOP");
         let gop = unsafe { &mut *gop.get() };
         let (width, height) = gop.current_mode_info().resolution();
         let (nc, nr) = (width / FONT_WIDTH, height / FONT_HEIGHT);

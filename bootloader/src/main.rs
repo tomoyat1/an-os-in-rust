@@ -1,8 +1,6 @@
 #![no_std]
 #![no_main]
 #![feature(abi_efiapi)]
-#![feature(alloc)]
-#![feature(asm)]
 extern crate alloc;
 extern crate bootlib;
 extern crate rlibc;
@@ -11,6 +9,7 @@ extern crate uefi_services;
 
 use crate::framebuffer::Framebuffer;
 use alloc::vec::*;
+use core::arch::asm;
 use core::ffi::c_void;
 use core::fmt::Write;
 use core::ptr;
@@ -49,8 +48,7 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     let loaded_image = system_table
         .boot_services()
         .handle_protocol::<LoadedImage>(handle)
-        .expect("error when loading loaded image protocol")
-        .expect("warnings when loading loaded image protocol");
+        .expect("error when loading loaded image protocol");
     let loaded_image = unsafe { &*loaded_image.get() };
     let (base, size) = loaded_image.info();
     writeln!(fb, "Bootloader was loaded at {:x}", base);
@@ -80,7 +78,7 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
     writeln!(fb, "Booting kernel...");
     let raw_fb = fb.raw_framebuffer();
 
-    let len = system_table.boot_services().memory_map_size();
+    let len = system_table.boot_services().memory_map_size().map_size;
     let len = len * 2;
     let mut mmap = Vec::<u8>::with_capacity(len);
     unsafe { mmap.set_len(len) }
@@ -91,8 +89,7 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
         Vec::<MemoryDescriptor>::with_capacity(len / mem::size_of::<MemoryDescriptor>() + 1);
     let (system_table, mmap_iter) = system_table
         .exit_boot_services(handle, mmap.as_mut_slice())
-        .expect("failed to exit boot services")
-        .expect("warnings when exiting boot services");
+        .expect("failed to exit boot services");
 
     // Pass virtual memory mappings to UEFI for relocation of runtime services.
     let mut head: u64 = 0xffffffff80000000;

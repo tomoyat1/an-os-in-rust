@@ -1,3 +1,4 @@
+use core::arch::asm;
 use core::ops::{Deref, DerefMut};
 use core::ptr::drop_in_place;
 use spin::MutexGuard;

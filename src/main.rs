@@ -2,9 +2,7 @@
 #![no_main]
 #![no_builtins]
 #![feature(linkage)]
-#![feature(asm)]
 #![feature(alloc_error_handler)]
-#![feature(const_fn)]
 
 extern crate alloc;
 extern crate bootlib;
