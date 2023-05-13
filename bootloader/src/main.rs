@@ -35,7 +35,7 @@ static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
 #[entry]
 fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     // Initialize logging.
-    uefi_services::init(&mut system_table);
+    uefi_services::init(&mut system_table)?;
     let addr = (&system_table as *const SystemTable<Boot>) as *const ();
     unsafe {
         SYSTEM_TABLE = addr;
@@ -104,10 +104,12 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         virt_mmap.push(ve);
     }
 
-    let new_system_table_virt_addr = virt_mmap.as_ptr() as u64 + head;
 
+    // The kernel expects the system table to be identity-mapped when it starts, so pass
+    // virt_mmap.as_prt() as u64 as the `new_system_table_virtual_addr`.
+    let system_table_virt_addr = virt_mmap.as_ptr() as u64;
     let system_table = unsafe {
-        system_table.set_virtual_address_map(&mut virt_mmap, new_system_table_virt_addr)
+        system_table.set_virtual_address_map(&mut virt_mmap, system_table_virt_addr)
             .expect("error when setting virtual memory map")
     };
 
@@ -119,7 +121,7 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         }
     };
 
-    let boot_data = 0x400000 as *mut bootlib::types::BootData;
+    let boot_data = 0x400000 as *mut BootData;
 
     let boot_data = unsafe {
         ptr::write(
