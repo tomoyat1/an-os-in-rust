@@ -2,7 +2,12 @@
 name = "an-operating-system-in-rust"
 version = "0.1.0"
 authors = ["Tomoya Tabuchi <t@tomoyat1.com>"]
-edition = "2018"
+edition = "2021"
+
+[[bin]]
+name = "aosir"
+path = "src/main.rs"
+
 
 [dependencies]
 rlibc = "1.0"
