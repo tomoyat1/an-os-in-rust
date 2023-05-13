@@ -33,9 +33,9 @@ use uefi::table::cfg::ACPI2_GUID;
 static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
 
 #[entry]
-fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
+fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     // Initialize logging.
-    uefi_services::init(&system_table);
+    uefi_services::init(&mut system_table);
     let addr = (&system_table as *const SystemTable<Boot>) as *const ();
     unsafe {
         SYSTEM_TABLE = addr;
@@ -51,7 +51,7 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
         .expect("error when loading loaded image protocol");
     let loaded_image = unsafe { &*loaded_image.get() };
     let (base, size) = loaded_image.info();
-    writeln!(fb, "Bootloader was loaded at {:x}", base);
+    writeln!(fb, "Bootloader was loaded at {:p}", base);
     writeln!(fb, "Loading kernel...");
 
     // ACPI RSDP
@@ -104,12 +104,12 @@ fn efi_main(handle: Handle, system_table: SystemTable<Boot>) -> Status {
         virt_mmap.push(ve);
     }
 
-    unsafe {
-        system_table
-            .runtime_services()
-            .set_virtual_address_map(&mut virt_mmap)
-            .expect("error when setting virtual memory map");
-    }
+    let new_system_table_virt_addr = virt_mmap.as_ptr() as u64 + head;
+
+    let system_table = unsafe {
+        system_table.set_virtual_address_map(&mut virt_mmap, new_system_table_virt_addr)
+            .expect("error when setting virtual memory map")
+    };
 
     let system_table = &system_table as *const SystemTable<Runtime>;
     let entry_point = match load_elf(&file) {
