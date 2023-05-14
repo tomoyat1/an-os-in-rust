@@ -3,6 +3,7 @@
 #![no_builtins]
 #![feature(linkage)]
 #![feature(alloc_error_handler)]
+#![feature(panic_info_message)]
 
 extern crate alloc;
 extern crate bootlib;
@@ -83,8 +84,16 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 
 #[panic_handler]
 /// panic() handles panics!()'s in the kernel. These are called "kernel panic"s.
-fn panic(_info: &PanicInfo) -> ! {
-    // Do nothing and loop for now.
+fn panic(info: &PanicInfo) -> ! {
+    serial::init();
+    match info.message() {
+        None => {
+            writeln!(serial::Handle, "Failed to get panic Argument");
+        },
+        Some(args) => {
+            core::fmt::write(&mut serial::Handle, *args);
+        }
+    };
     // TODO: Paint screen red.
     loop {}
 }
