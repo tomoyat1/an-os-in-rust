@@ -1,5 +1,7 @@
 use alloc::format;
 use alloc::string::String;
+use core::mem::size_of;
+use core::ptr;
 use core::ptr::slice_from_raw_parts;
 
 pub struct MADT {
@@ -22,28 +24,29 @@ struct _MADT {
 
 #[repr(C)]
 struct RSDP {
-    signature: [u8; 8],
-    checksum: u8,
-    oemid: [u8; 6],
-    revision: u8,
-    rstd_addr: u32,
-    length: u32,
-    xsdt_addr: usize,
-    // omit extended checksum
+    signature: [u8; 8], // byte offset: 0
+    checksum: u8,       // byte offset: 8
+    oemid: [u8; 6],     // byte offset: 9
+    revision: u8,       // byte offset: 15
+    rstd_addr: u32,     // byte offset: 16
+    length: u32,        // byte offset: 20
+    xsdt_addr: usize,   // byte offset: 24
+    ext_chksum: u8,     // byte offset: 32
+    _reserved: [u8; 3], // byte offset: 33
 }
 
 #[repr(C)]
 struct XSDT {
-    signature: [u8; 4],
-    length: u32,
-    revision: u8,
-    checksum: u8,
-    oemid: [u8; 6],
-    oem_table_id: [u8; 8],
-    oem_revision: [u8; 4],
-    creator_id: [u8; 4],
-    creator_revision: [u8; 4],
-    entry: *const usize, // offset 36
+    signature: [u8; 4],        // byte offset: 0
+    length: u32,               // byte offset: 4
+    revision: u8,              // byte offset: 8
+    checksum: u8,              // byte offset: 9
+    oemid: [u8; 6],            // byte offset: 10
+    oem_table_id: [u8; 8],     // byte offset: 16
+    oem_revision: [u8; 4],     // byte offset: 24
+    creator_id: [u8; 4],       // byte offset: 28
+    creator_revision: [u8; 4], // byte offset: 32
+    entry: *const usize,       // byte offset: 36
 }
 
 #[repr(C)]
@@ -61,30 +64,31 @@ struct DescriptionHeader {
 }
 
 pub fn parse_madt(rsdp: *const core::ffi::c_void) -> core::result::Result<MADT, String> {
-    let rsdp = unsafe { &*(rsdp as *const RSDP) };
-    let signature = core::str::from_utf8(&rsdp.signature)
-        .map_err(|e| format!("failed to read signature: {:?}", e))?;
-    assert_eq!(signature, "RSD PTR ");
+    let rsdp = unsafe { ptr::read_unaligned(rsdp as *const RSDP) };
+    assert_eq!(&rsdp.signature, b"RSD PTR ");
 
-    let xsdt = unsafe { &*(rsdp.xsdt_addr as *const XSDT) };
+    let xsdt_addr = rsdp.xsdt_addr;
+    let xsdt = unsafe { ptr::read_unaligned(xsdt_addr as *const XSDT) };
+    assert_eq!(&xsdt.signature, b"XSDT");
+
     let len = ((xsdt.length - 36) / 8) as usize;
     // HACK: since we know the offset of xsdt.entry from the ACPI specs, calculate its address manually.
-    let xsdt_entry = rsdp.xsdt_addr + 36;
-    let xsdt_entry = xsdt_entry as *const usize;
-    let xsdt_entry = unsafe { &*slice_from_raw_parts(xsdt_entry, len) };
+    let xsdt_entry_addr = rsdp.xsdt_addr + 36;
+    let xsdt_entry_addr = unsafe { xsdt_entry_addr as *const usize};
+    // let xsdt_entry = unsafe { &*slice_from_raw_parts(xsdt_entry_addr, len) };
 
     let mut madt = MADT {
         lapic_addr: 0,
         ioapic_addr: 0,
         global_system_interrupt_base: 0,
     };
-    for &ptr in xsdt_entry.iter() {
-        let header = ptr as *const DescriptionHeader;
-        let header = unsafe { &*header };
+    for e in 0..len {
+        let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize))};
+        let header = unsafe { ptr::read_unaligned(entry_addr as *const DescriptionHeader) };
         let signature = core::str::from_utf8(&header.signature).expect("failed to parse signature");
 
         if signature == "APIC" {
-            madt = _parse_madt(ptr, header.length);
+            madt = _parse_madt(entry_addr, header.length);
         }
     }
 
