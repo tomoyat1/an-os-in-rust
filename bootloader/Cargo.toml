@@ -4,10 +4,14 @@ version = "0.1.0"
 authors = ["tomoyat1 <t@tomoyat1.com>"]
 edition = "2018"
 
+[[bin]]
+name = "bootx64"
+path = "src/main.rs"
+
 [dependencies]
 log = { version = "0.4", default-features = false }
-uefi = "0.5.0"
-uefi-services = "0.2.5"
+uefi = "0.15.2"
+uefi-services = "0.12.1"
 array-macro = "1.0.5"
 rlibc = "1"
 bootlib = { path = "../bootlib" }

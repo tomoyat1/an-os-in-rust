@@ -2,6 +2,7 @@ use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use uefi::CStr16;
 use uefi::prelude::*;
 use uefi::proto::media::file::{File, FileAttribute, FileInfo, FileMode, FileType};
 use uefi::proto::media::fs::SimpleFileSystem;
@@ -17,21 +18,19 @@ pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<Vec<u
                 "Simple File System Protocol support is required: {:?}",
                 e.status()
             ))
-        })?
-        .expect("warnings occurred when opening SFS");
+        })?;
     let fs = unsafe { &mut *fs.get() };
+    let mut kernel_obj = [0; 8];
+    let kernel_obj = CStr16::from_str_with_buf("aosir", &mut kernel_obj);
     let dir = &mut fs
         .open_volume()
-        .map_err(|e| String::from(format!("failed to open root directory: {:?}", e.status())))?
-        .expect("warnings occurred when opening directory");
+        .map_err(|e| String::from(format!("failed to open root directory: {:?}", e.status())))?;
     let kernel_file = dir
-        .open("aosir", FileMode::Read, FileAttribute::READ_ONLY)
-        .map_err(|e| String::from(format!("failed to obtain file handle: {:?}", e.status())))?
-        .expect("warnings occurred when obtaining file handle");
+        .open(kernel_obj.unwrap(), FileMode::Read, FileAttribute::READ_ONLY)
+        .map_err(|e| String::from(format!("failed to obtain file handle: {:?}", e.status())))?;
     let kernel_file = kernel_file
         .into_type()
-        .map_err(|e| String::from(format!("failed to get file type: {:?}", e.status())))?
-        .expect("warnings occurred when getting file type");
+        .map_err(|e| String::from(format!("failed to get file type: {:?}", e.status())))?;
     match kernel_file {
         FileType::Dir(_) => Err(String::from(
             "directory found instead of kernel binary at /aosir",
@@ -50,8 +49,7 @@ pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<Vec<u
                     .get_info::<FileInfo>(&mut info_buf)
                     .map_err(|e| {
                         String::from(format!("failed to get file info: {:?}", e.status()))
-                    })?
-                    .expect("warnings when getting file info");
+                    })?;
                 info.file_size();
                 let mut buf: Vec<u8> = Vec::with_capacity(info.file_size() as usize);
                 unsafe {
@@ -59,8 +57,7 @@ pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<Vec<u
                 }
                 let read_size = f
                     .read(&mut buf)
-                    .map_err(|e| String::from(format!("failed to read kernel: {:?}", e.status())))?
-                    .expect("warnings when reading kernel");
+                    .map_err(|e| String::from(format!("failed to read kernel: {:?}", e.status())))?;
                 Ok(buf)
             } else {
                 Err(format!(

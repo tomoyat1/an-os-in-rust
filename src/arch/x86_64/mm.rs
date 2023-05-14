@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 use uefi::table::boot;
 
 use crate::mm::malloc;

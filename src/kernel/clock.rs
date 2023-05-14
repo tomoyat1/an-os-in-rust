@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 pub(crate) enum Mode {
     UNINITIALIZED,
     ONESHOT,

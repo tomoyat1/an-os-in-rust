@@ -16,14 +16,11 @@
   "os": "none",
   "panic-strategy": "abort",
   "position-independent-executables": false,
-  "pre-link-args": {
-    "ld.lld": [
-      "-Tlink.ld"
-    ]
-  },
   "relocation-model": false,
   "singlethread": true,
-  "stack-probes": true,
+  "stack-probes": {
+    "kind": "call"
+  },
   "target-c-int-width": "32",
   "target-endian": "little",
   "target-pointer-width": "64",
