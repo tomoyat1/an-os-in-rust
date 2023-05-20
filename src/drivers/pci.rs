@@ -117,7 +117,7 @@ impl PCIDevice {
 /// Enumerates PCI bus for devices.
 fn enumerate_pci_bus(lapic_id: u32) -> Vec<PCIDevice> {
     let mut devices = Vec::<PCIDevice>::new();
-    for n_bus in 0..255 as u32 {
+    for n_bus in 0..256 as u32 {
         for n_device in 0..32 as u32 {
             // We assume single function devices for now.
             let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11;
