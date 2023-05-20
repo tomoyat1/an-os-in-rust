@@ -10,6 +10,9 @@ const REG_CAP_PTR: u16 = 0x34;
 // per-device, but we go with a hard-coded constant for simplicity for the time being.
 const MSI_VECTOR: u32 = 0x26;
 
+const CONFIG_ADDRESS: u16 = 0xcf8;
+const CONFIG_DATA: u16 = 0xcfc;
+
 static mut PCI: WithSpinLock<Option<PCI>> = WithSpinLock::new(None);
 
 pub fn init(lapic_id: u32) {
@@ -66,23 +69,23 @@ impl PCIDevice {
         let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | offset as u32;
 
         // Set register to write to.
-        port::outl(0xcf8, cfg_addr);
+        port::outl(CONFIG_ADDRESS, cfg_addr);
 
         // Actually write.
-        port::outl(0xcfc, data)
+        port::outl(CONFIG_DATA, data)
     }
 
     unsafe fn inl(&self, offset: u16, function: u32) -> u32 {
         let n_bus = self.bus_number as u32;
         let n_device = self.device_number as u32;
         let function: u32 = (function & 0b111) << 8;
-        let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | offset as u32;
+        let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | (offset & 0xFC) as u32;
 
         // Set register to write to.
-        port::outl(0xcf8, cfg_addr);
+        port::outl(CONFIG_ADDRESS, cfg_addr);
 
         // Actually read.
-        port::inl(0xcfc)
+        port::inl(CONFIG_DATA)
     }
 
     pub fn read_control_register(&self, function: u32) -> u16 {
@@ -118,11 +121,12 @@ fn enumerate_pci_bus(lapic_id: u32) -> Vec<PCIDevice> {
             // We assume single function devices for now.
             let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11;
             let cfg_data = unsafe {
-                port::outl(0xcf8, cfg_addr);
-                port::inl(0xcfc)
+                port::outl(CONFIG_ADDRESS, cfg_addr);
+                port::inl(CONFIG_DATA)
             };
 
-            if cfg_data == 0xffffffff {
+            if cfg_data & 0xffff == 0xffff {
+                // Invalid vendor ID.
                 // Nothing found at bus:device combination.
                 continue;
             }
