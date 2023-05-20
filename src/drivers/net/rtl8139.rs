@@ -36,7 +36,7 @@ pub fn init<'a>() -> Vec<RTL8139> {
             }
         }
     }
-    v // borrow checker げきおこ
+    v
 }
 
 pub struct RTL8139 {
