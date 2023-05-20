@@ -30,7 +30,7 @@ pub unsafe fn outl(port: u16, data: u32) {
     asm!(
     "out dx, eax",
     in("rdx") port,
-    in("rax") data as u16,
+    in("rax") data as u32,
     )
 }
 
