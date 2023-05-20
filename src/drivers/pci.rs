@@ -40,6 +40,7 @@ impl PCI {
 
         let mut v = Vec::<PCIDevice>::new();
 
+        // Give ownership of matched devices to the caller.
         for d in self.devices.drain_filter(p) {
             v.push(d)
         }
