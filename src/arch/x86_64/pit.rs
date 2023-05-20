@@ -20,12 +20,15 @@ pub struct PIT {
 
 impl PIT {
     pub const fn new() -> Self {
-        Self { count: 0, mode: clock::Mode::UNINITIALIZED }
+        Self {
+            count: 0,
+            mode: clock::Mode::UNINITIALIZED,
+        }
     }
 }
 
 pub unsafe fn start() -> impl Clock {
-    let mut pit = unsafe{ PIT.lock()};
+    let mut pit = unsafe { PIT.lock() };
     pit.start_rate();
     interrupt::mask_line(false, IOAPIC_LINE);
     &PIT

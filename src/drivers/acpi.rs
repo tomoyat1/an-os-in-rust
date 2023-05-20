@@ -74,7 +74,7 @@ pub fn parse_madt(rsdp: *const core::ffi::c_void) -> core::result::Result<MADT, 
     let len = ((xsdt.length - 36) / 8) as usize;
     // HACK: since we know the offset of xsdt.entry from the ACPI specs, calculate its address manually.
     let xsdt_entry_addr = rsdp.xsdt_addr + 36;
-    let xsdt_entry_addr = unsafe { xsdt_entry_addr as *const usize};
+    let xsdt_entry_addr = unsafe { xsdt_entry_addr as *const usize };
     // let xsdt_entry = unsafe { &*slice_from_raw_parts(xsdt_entry_addr, len) };
 
     let mut madt = MADT {
@@ -83,7 +83,7 @@ pub fn parse_madt(rsdp: *const core::ffi::c_void) -> core::result::Result<MADT, 
         global_system_interrupt_base: 0,
     };
     for e in 0..len {
-        let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize))};
+        let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize)) };
         let header = unsafe { ptr::read_unaligned(entry_addr as *const DescriptionHeader) };
         let signature = core::str::from_utf8(&header.signature).expect("failed to parse signature");
 

@@ -4,6 +4,9 @@
 #![feature(linkage)]
 #![feature(alloc_error_handler)]
 #![feature(panic_info_message)]
+#![allow(unused)]
+#![allow(unused_unsafe)]
+#![feature(drain_filter)]
 
 extern crate alloc;
 extern crate bootlib;
@@ -66,7 +69,6 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         serial::tmp_write_com1(b"\r\nNO NIC\r\n")
     }
 
-
     // Start scheduler
 
     // Scheduler should not return;
@@ -89,7 +91,7 @@ fn panic(info: &PanicInfo) -> ! {
     match info.message() {
         None => {
             writeln!(serial::Handle, "Failed to get panic Argument");
-        },
+        }
         Some(args) => {
             core::fmt::write(&mut serial::Handle, *args);
         }

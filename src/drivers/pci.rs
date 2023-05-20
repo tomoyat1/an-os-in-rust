@@ -29,15 +29,15 @@ pub struct PCI {
 // Note: An instance of PCI that is static mut should exist. See comment in rtl8139 driver code.
 
 impl PCI {
-    pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<&mut PCIDevice> {
+    pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<PCIDevice> {
         let vendor_id = vendor_id;
         let device_id = device_id;
-        let iter = self
-            .devices
-            .iter_mut()
-            .filter(move |x| x.vendor_id == vendor_id && x.device_id == device_id);
-        let mut v = Vec::<&mut PCIDevice>::new();
-        for d in iter {
+
+        let p = |x: &mut PCIDevice| -> bool { x.device_id == device_id && x.vendor_id == vendor_id };
+
+        let mut v = Vec::<PCIDevice>::new();
+
+        for d in self.devices.drain_filter(p) {
             v.push(d)
         }
         v
@@ -184,7 +184,7 @@ fn enumerate_pci_bus(lapic_id: u32) -> Vec<PCIDevice> {
 }
 
 impl WithSpinLock<Option<PCI>> {
-    pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<&mut PCIDevice> {
+    pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<PCIDevice> {
         let mut pci = unsafe { self.lock() };
         let pci = pci.as_mut();
         if let Some(pci) = pci {
@@ -198,9 +198,7 @@ impl WithSpinLock<Option<PCI>> {
 pub struct Handle;
 
 impl Handle {
-    pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<&mut PCIDevice> {
-        unsafe {
-            PCI.get_device(vendor_id, device_id)
-        }
+    pub fn get_device<'a>(mut self, vendor_id: u16, device_id: u16) -> Vec<PCIDevice> {
+        unsafe { PCI.get_device(vendor_id, device_id) }
     }
 }

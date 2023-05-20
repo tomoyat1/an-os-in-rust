@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 use core::sync::atomic::spin_loop_hint;
 
+use crate::arch::x86_64::port;
 use crate::drivers::pci;
 use crate::drivers::pci::PCIDevice;
-use crate::arch::x86_64::port;
 
 /// Vendor ID of Realtek
 const RTL8139_VENDOR_ID: u16 = 0x10ec;
@@ -24,34 +24,31 @@ const REG_IMR: u16 = 0x3c;
 const REG_RCR: u16 = 0x44;
 
 /// Initializes all RTL8139s on the PCI bus.
-pub fn init() -> Vec<RTL8139<'static>> {
+pub fn init<'a>() -> Vec<RTL8139> {
     let devices = pci::Handle.get_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
-    let mut v = Vec::<RTL8139<'static>>::new();
+    let mut v = Vec::<RTL8139>::new();
 
     for pci_dev in devices {
         {
             match RTL8139::init(pci_dev) {
-                Ok(rtl8139) => {
-                    v.push(rtl8139)
-                }, Err(()) => {
-                    continue
-                }
+                Ok(rtl8139) => v.push(rtl8139),
+                Err(()) => continue,
             }
         }
-    };
-    v
+    }
+    v // borrow checker げきおこ
 }
 
-pub struct RTL8139<'pci> {
+pub struct RTL8139 {
     // This should ideally be made module private.
-    pub(crate) pci: &'pci mut PCIDevice,
+    pub(crate) pci: PCIDevice,
 
     // RTL8139 specific fields follow
-    rx_buf: Vec<u8>
+    rx_buf: Vec<u8>,
 }
 
-impl RTL8139<'_> {
-    fn init(pci: &mut pci::PCIDevice) -> Result<RTL8139, ()> {
+impl RTL8139 {
+    fn init<'a>(mut pci: pci::PCIDevice) -> Result<RTL8139, ()> {
         // Use the rx buffer size 8192 + 16 + 1500 bytes. 8192 + 16 lets us write 0 for the buffer size
         // specification in the next step (receive configuration), and the extra 1500 bytes is for overflow when using
         // WRAP = 1 in the RCR.
@@ -61,10 +58,7 @@ impl RTL8139<'_> {
             rx_buf.set_len(rx_buf_len);
         }
 
-        let mut rtl8139 = RTL8139{
-            pci,
-            rx_buf,
-        };
+        let mut rtl8139 = RTL8139 { pci, rx_buf };
 
         // Enable bus mastering and IOEN. This lets PCI device to perform DMA.
         rtl8139.pci.write_control_register(0x0005, 0);
@@ -75,7 +69,7 @@ impl RTL8139<'_> {
         };
 
         // Software Reset
-        unsafe  {
+        unsafe {
             rtl8139.outb(REG_COMMAND, 0x10);
             while rtl8139.inb(REG_COMMAND) & 0x10 != 0 {
                 spin_loop_hint();
@@ -85,9 +79,7 @@ impl RTL8139<'_> {
         // Init recv buffer
         // TODO: get physical address of rx_buf. This will require additions to virtual mem code.
         let not_rx_buf_addr = rtl8139.rx_buf.as_ptr();
-        unsafe {
-            rtl8139.outl(REG_RBSTART, not_rx_buf_addr as u32)
-        }
+        unsafe { rtl8139.outl(REG_RBSTART, not_rx_buf_addr as u32) }
 
         // Receive configuration
         // Accept
@@ -117,15 +109,14 @@ impl RTL8139<'_> {
             rtl8139.outw(REG_IMR, 0x0005);
         }
 
-
         Ok(rtl8139)
     }
 
     #[inline]
-    fn ioaddr(&self, offset: u16) ->  u16 {
+    fn ioaddr(&self, offset: u16) -> u16 {
         // If calls to pci.read_bar1() get to slow we should cache the addr in RAM.
         // RTL8139 driver should own the cached field.
-        let base =  (self.pci.read_bar1(0) & !0xf) as u16;
+        let base = (self.pci.read_bar1(0) & !0xf) as u16;
         base + offset
     }
 
@@ -147,7 +138,6 @@ impl RTL8139<'_> {
         port::outl(self.ioaddr(offset), data)
     }
 }
-
 
 // Note: The struct which represents a single RTL8139 can solely own all the data related to it.
 //       It should be put behind a WithSpinLock<T> or better another locking structure with queuing semantics

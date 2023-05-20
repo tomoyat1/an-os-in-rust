@@ -33,13 +33,13 @@ pub fn read_com1() {
         let com1 = com1.as_ref();
         match com1 {
             Some(com1) => {
-                    if let Ok(len) = com1.read(&mut buf) {
-                        // TODO: read byte into the driver's buffer instead of writing it out.
-                        //       deciding to write the byte out should be the job of whoever gets the
-                        //       byte from the buffer.
-                        let buf = &buf[0..len];
-                        com1.write_all(buf);
-                    }
+                if let Ok(len) = com1.read(&mut buf) {
+                    // TODO: read byte into the driver's buffer instead of writing it out.
+                    //       deciding to write the byte out should be the job of whoever gets the
+                    //       byte from the buffer.
+                    let buf = &buf[0..len];
+                    com1.write_all(buf);
+                }
             }
             None => {}
         }
@@ -153,10 +153,10 @@ impl Com {
                 Ok(written) => {
                     let (_, t) = slice.split_at(written);
                     slice = t;
-                },
-                Err(_) => return Err(())
+                }
+                Err(_) => return Err(()),
             };
-        };
+        }
         Ok(())
     }
 }
@@ -168,7 +168,7 @@ impl core::fmt::Write for WithSpinLock<Option<Com>> {
         if let Some(com) = com {
             match com.write_all(s.as_bytes()) {
                 Ok(()) => Ok(()),
-                Err(()) => Err(core::fmt::Error)
+                Err(()) => Err(core::fmt::Error),
             }
         } else {
             Err(core::fmt::Error)
@@ -185,8 +185,6 @@ pub struct Handle;
 
 impl core::fmt::Write for Handle {
     fn write_str(&mut self, s: &str) -> Result<(), core::fmt::Error> {
-        unsafe {
-            COM1.write_str(s)
-        }
+        unsafe { COM1.write_str(s) }
     }
 }
