@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::spin_loop_hint;
 use core::fmt::Write;
 
-use crate::arch::x86_64::port;
+use crate::arch::x86_64::{mm, port};
 use crate::drivers::pci;
 use crate::drivers::pci::PCIDevice;
 
@@ -82,8 +82,9 @@ impl RTL8139 {
 
         // Init recv buffer
         // TODO: get physical address of rx_buf. This will require additions to virtual mem code.
-        let not_rx_buf_addr = rtl8139.rx_buf.as_ptr();
-        unsafe { rtl8139.outl(REG_RBSTART, not_rx_buf_addr as u32) }
+        let rx_buf_addr = rtl8139.rx_buf.as_ptr();
+        let rx_buf_addr = mm::phys_addr(rx_buf_addr);
+        unsafe { rtl8139.outl(REG_RBSTART, rx_buf_addr as u32) }
 
         // Receive configuration
         // Accept
