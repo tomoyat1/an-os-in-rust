@@ -36,7 +36,8 @@ impl PCI {
         let vendor_id = vendor_id;
         let device_id = device_id;
 
-        let p = |x: &mut PCIDevice| -> bool { x.device_id == device_id && x.vendor_id == vendor_id };
+        let p =
+            |x: &mut PCIDevice| -> bool { x.device_id == device_id && x.vendor_id == vendor_id };
 
         let mut v = Vec::<PCIDevice>::new();
 
@@ -80,7 +81,8 @@ impl PCIDevice {
         let n_bus = self.bus_number as u32;
         let n_device = self.device_number as u32;
         let function: u32 = (function & 0b111) << 8;
-        let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | (offset & 0xFC) as u32;
+        let cfg_addr: u32 =
+            0x80000000 | n_bus << 16 | n_device << 11 | function | (offset & 0xFC) as u32;
 
         // Set register to write to.
         port::outl(CONFIG_ADDRESS, cfg_addr);
@@ -105,8 +107,12 @@ impl PCIDevice {
         ((read & 0xffff0000) >> 16) as u16
     }
 
-    pub fn read_bar1(&self, function: u32) -> u32 {
-        unsafe { self.inl(0x10, function) }
+    pub fn read_bar0(&self, function: u32) -> u32 {
+        let header_type: u8 = ((unsafe { self.inl(0xC, function) } & 0x00FF0000) >> 16) as u8;
+        match header_type {
+            0x0 => unsafe { self.inl(0x10, function) },
+            _ => 0
+        }
     }
 
     pub fn write_bar1(&self, function: u32, data: u32) {

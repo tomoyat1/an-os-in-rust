@@ -114,9 +114,20 @@ impl RTL8139 {
 
     #[inline]
     fn ioaddr(&self, offset: u16) -> u16 {
-        // If calls to pci.read_bar1() get to slow we should cache the addr in RAM.
+        // If calls to pci.read_bar0() get to slow we should cache the address in RAM.
         // RTL8139 driver should own the cached field.
-        let base = (self.pci.read_bar1(0) & !0xf) as u16;
+
+        // TODO: support multiple function devices.
+        let bar_0 = self.pci.read_bar0(0);
+        let base = match bar_0 & 0x1 {
+            // Memory space BAR
+            0 => bar_0 & !0xf,
+            // IO space BAR
+            1 => bar_0 & !0x3,
+            _ => {
+                panic!("Bottom bit of BAR 0 was not 0 or 1!")
+            }
+        } as u16;
         base + offset
     }
 

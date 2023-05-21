@@ -64,7 +64,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     if nics.len() == 1 {
         serial::tmp_write_com1(b"\r\nRTL8139 FOUND\r\n");
         let nic = &nics[0];
-        writeln!(serial::Handle, "BAR len: {:x}", nic.pci.read_bar1(0));
+        writeln!(serial::Handle, "BAR 0: {:x}", nic.pci.read_bar0(0));
     } else {
         serial::tmp_write_com1(b"\r\nNO NIC\r\n")
     }
