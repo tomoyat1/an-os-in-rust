@@ -1,9 +1,13 @@
 use alloc::vec::Vec;
 use core::sync::atomic::spin_loop_hint;
+use core::fmt::Write;
 
 use crate::arch::x86_64::port;
 use crate::drivers::pci;
 use crate::drivers::pci::PCIDevice;
+
+// For debugging
+use crate::drivers::serial;
 
 /// Vendor ID of Realtek
 const RTL8139_VENDOR_ID: u16 = 0x10ec;
@@ -170,5 +174,6 @@ impl RTL8139 {
 // This should be per-rtl8139 instead of a single shared public func.
 #[no_mangle]
 pub fn rtl8139_handler() {
-    let two = 1 + 1;
+    // This is bad
+    writeln!(serial::Handle, "IRQ for RTL8139!");
 }
