@@ -93,18 +93,18 @@ impl RTL8139 {
         // - unicast to device MAC address
         // - unicast to any MAC address
         // In other words, any valid packet.
-        let accept_config: u32 = 0b1110;
+        let accept_config: u32 = 0b1111;
 
         // Configure WRAP behaviour so that packets overflowing the rx ring buffer would be written
         // to the end in space following the buffer.
         let wrap: u32 = 0b1 << 7;
         unsafe {
-            rtl8139.outl(0x44, accept_config | wrap);
+            rtl8139.outl(REG_RCR, accept_config | wrap);
         }
 
         // Enable transmitter and receiver.
         unsafe {
-            rtl8139.outl(REG_COMMAND, 0x0c);
+            rtl8139.outb(REG_COMMAND, 0x0c);
         }
 
         // Set up interrupts.
@@ -149,8 +149,6 @@ impl RTL8139 {
     }
 
     unsafe fn outl(&self, offset: u16, data: u32) {
-        // Assume here that bar1 contains an IO port addr.
-        // TODO: support memory mapped registers.
         port::outl(self.ioaddr(offset), data)
     }
 }
