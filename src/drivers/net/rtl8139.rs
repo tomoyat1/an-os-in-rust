@@ -168,6 +168,7 @@ impl RTL8139 {
 // TODO: write actual code for ISR handler.
 //       This function should
 //       1. Figure out what kind of event woke us up by reading the interrupt status register.
+//          Interrupt Status Register outw(0x3e, 0x5)
 //       2. Handle the event.
 //       3. Clear the corresponding bit in the interrupt status reg.
 // This should be per-rtl8139 instead of a single shared public func.

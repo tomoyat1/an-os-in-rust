@@ -90,6 +90,7 @@ pub fn init(madt: acpi::MADT) -> u32 {
     }
 
     // rtl8139 MSI interrupt
+    // TODO: RTL8139 doesn't support MSI according to the PCI configuration space. This code is wrong.
     {
         let mut descriptor: u128 = 0;
         let handler = rtl8139_isr as usize;
@@ -166,6 +167,7 @@ unsafe extern "C" fn com0_handler() {
     lapic.write(0xb0, 0)
 }
 
+/// Mask 8259 PIC.
 fn mask_pic() {
     unsafe {
         asm!(
@@ -216,8 +218,8 @@ impl IOAPIC {
         self.write(0x13, (lapic_id << 24) & 0x0f000000);
 
         // PIT
-        // The following assumes that PIT is wired to ISA line 0 and remapped to line 2 of I/O APIC
-        // TODO: parse MADT for remappings
+        // The following assumes that PIT is wired to ISA line 0 and remapped to line 2 of I/O APIC; confirmed from MADT
+        // TODO: parse MADT for remappings on boot.
         // Also, we mask PIT until it is properly initialized later.
         self.write(0x14, 0x10020);
         self.write(0x15, (lapic_id << 24) & 0x0f000000);
@@ -226,9 +228,18 @@ impl IOAPIC {
         self.write(0x18, 0x24);
         self.write(0x19, (lapic_id << 24) & 0x0f000000);
 
+        // RTL8139
+        // On ISA 0xb according to PCI configuration space.
+        // Mapped to  I/O APIC line 0xb, according to MADT.
+        // TODO: initialize this in the RTL8139 driver after we can read the above info.
+        self.write(0x26, 0x26);
+        self.write(0x27, (lapic_id << 24) & 0x0f000000);
+
         // Mouse (masked)
+        // TODO: how do we know that the mouse is on I/O APIC line 12?
         self.write(0x28, 0x100FF);
-        self.write(0x19, (lapic_id << 24) & 0x0f000000);
+        self.write(0x29, (lapic_id << 24) & 0x0f000000);
+
 
         // Spurious Interrupt Vector
         self.write(0xf0, (0x1 << 8) + 0xff);
