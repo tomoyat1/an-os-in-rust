@@ -60,6 +60,9 @@ pub struct PCIDevice {
     subsystem_id: u16,
     subsystem_vendor_id: u16,
 
+    interrupt_pin: u8,
+    interrupt_line: u8,
+
     msi_capability_pointer: Option<u16>,
 }
 
@@ -147,11 +150,19 @@ fn enumerate_pci_bus(lapic_id: u32) -> Vec<PCIDevice> {
                 vendor_id,
                 device_id,
 
+                interrupt_line: 0,
+                interrupt_pin: 0,
+
                 // TODO: properly fill in these fields, and possibly more.
                 subsystem_id: 0,
                 subsystem_vendor_id: 0,
                 msi_capability_pointer: None,
             };
+
+            unsafe {
+                device.interrupt_line = (device.inl(0x3c, 0) & 0xff) as u8;
+                device.interrupt_pin = ((device.inl(0x3c, 0) & 0xff00) >> 8) as u8;
+            }
 
             // Look for MSI capbility struture
             // TODO: generalize this to enumerate all capabilities in the future.
