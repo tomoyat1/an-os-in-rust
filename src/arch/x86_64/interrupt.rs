@@ -20,6 +20,8 @@ pub static mut IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC::new(0));
 
 pub static mut LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC::new(0));
 
+static mut IDT: WithSpinLock<[u128; 40]> = WithSpinLock::new([0; 40]);
+
 #[repr(C)]
 #[repr(packed)]
 struct IDTR {
@@ -30,11 +32,7 @@ struct IDTR {
 type IDT = vec::Vec<u128>;
 
 pub fn init(madt: acpi::MADT) -> u32 {
-    let mut idt = vec::Vec::<u128>::with_capacity(40);
-    unsafe {
-        idt.set_len(40);
-    }
-
+    let mut idt = unsafe { IDT.lock()};
     // Set up each fault and IRQ handler.
     // TODO: make IRQ handlers pluggable from outside this module.
     // page fault handler
