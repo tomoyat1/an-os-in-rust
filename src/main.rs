@@ -45,7 +45,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let madt = acpi::parse_madt(boot_data.acpi_rsdp).expect("failed to parse MADT");
     init_mm(boot_data.memory_map); // TODO: error handling
     let gdt = pm::init();
-    let lapic_id = interrupt::init(madt);
+    let lapic_id = interrupt::init(&madt);
     let mut clock = pit::start();
     serial::init();
 
@@ -60,11 +60,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 
     // Initialize PCI devices
     pci::init(lapic_id);
-    let nics = rtl8139::init();
-    if nics.len() == 1 {
+    let nics = rtl8139::init(&madt.interrupt_mappings);
+    if nics == 1 {
         serial::tmp_write_com1(b"\r\nRTL8139 FOUND\r\n");
-        let nic = &nics[0];
-        writeln!(serial::Handle, "BAR 0: {:x}", nic.pci.read_bar0(0));
     } else {
         serial::tmp_write_com1(b"\r\nNO NIC\r\n")
     }

@@ -166,6 +166,7 @@ rtl8139_isr:
     pushq %r10
     pushq %r11
     cld
+    movq $0x26, %rdi # vector: u64
     call rtl8139_handler
     popq %r11
     popq %r10

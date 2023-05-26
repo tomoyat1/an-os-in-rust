@@ -1,5 +1,6 @@
 use alloc::format;
 use alloc::string::String;
+use alloc::vec;
 use core::mem::size_of;
 use core::ptr;
 use core::ptr::slice_from_raw_parts;
@@ -8,6 +9,8 @@ pub struct MADT {
     pub lapic_addr: usize,
     pub ioapic_addr: usize, // TODO: consider case where multiple I/O APICs exist.
     pub global_system_interrupt_base: u32,
+
+    pub interrupt_mappings: vec::Vec<InterruptMapping>,
 }
 
 #[repr(C)]
@@ -81,6 +84,7 @@ pub fn parse_madt(rsdp: *const core::ffi::c_void) -> core::result::Result<MADT, 
         lapic_addr: 0,
         ioapic_addr: 0,
         global_system_interrupt_base: 0,
+        interrupt_mappings: vec::Vec::new(),
     };
     for e in 0..len {
         let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize)) };
@@ -134,6 +138,12 @@ struct InterruptSourceOverride {
     flags: u16,
 }
 
+#[derive(Copy, Clone)]
+pub struct InterruptMapping {
+    pub(crate) irq_number: u8,
+    pub(crate) global_system_interrupt: u8,
+}
+
 fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
     let madt = (madt_addr + 36) as *const _MADT;
     let madt = unsafe { &*madt };
@@ -146,6 +156,7 @@ fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
         lapic_addr: madt.lapic_addr as usize,
         ioapic_addr: 0,
         global_system_interrupt_base: 0,
+        interrupt_mappings: vec::Vec::new(),
     };
     while head < tail {
         let ty = unsafe { *(head as *const u8) };
@@ -163,7 +174,11 @@ fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
                 // Interrupt source override
                 let mapping = head as *const InterruptController<InterruptSourceOverride>;
                 let mapping = unsafe { &*mapping };
-                let foo = 1 + 1;
+                let mapping = InterruptMapping {
+                    irq_number: mapping.type_specific.source,
+                    global_system_interrupt: mapping.type_specific.global_system_interrupt,
+                };
+                madt_info.interrupt_mappings.push(mapping)
             }
             5 => {
                 // Local APIC address override

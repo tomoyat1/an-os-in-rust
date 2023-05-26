@@ -1,13 +1,19 @@
+use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::spin_loop_hint;
 use core::fmt::Write;
+use core::hint::spin_loop;
 
+use crate::arch::x86_64::interrupt::{IOAPIC, LOCAL_APIC};
 use crate::arch::x86_64::{mm, port};
-use crate::drivers::pci;
 use crate::drivers::pci::PCIDevice;
+use crate::drivers::{acpi, pci};
 
 // For debugging
 use crate::drivers::serial;
+use crate::locking::spinlock::WithSpinLock;
+
+pub static mut NICS: WithSpinLock<Vec<Arc<RTL8139>>> = WithSpinLock::new(Vec::new());
 
 /// Vendor ID of Realtek
 const RTL8139_VENDOR_ID: u16 = 0x10ec;
@@ -25,34 +31,61 @@ const REG_RBSTART: u16 = 0x30;
 // Interrupt Mask Register
 const REG_IMR: u16 = 0x3c;
 
+// Interrupt Status Register
+const REG_ISR: u16 = 0x3e;
+
 const REG_RCR: u16 = 0x44;
 
 /// Initializes all RTL8139s on the PCI bus.
-pub fn init<'a>() -> Vec<RTL8139> {
+pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
     let devices = pci::Handle.get_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
-    let mut v = Vec::<RTL8139>::new();
+
+    // SAFETY: we have and exclusive lock on the static mut NICS.
+    let mut nics = unsafe { NICS.lock() };
 
     for pci_dev in devices {
-        {
-            match RTL8139::init(pci_dev) {
-                Ok(rtl8139) => v.push(rtl8139),
-                Err(()) => continue,
+        if let Ok(rtl8139) = RTL8139::init(pci_dev) {
+            let mapping = interrupt_mappings
+                .iter()
+                .filter(|x| x.irq_number == rtl8139.pci.interrupt_line)
+                .next();
+            if let Some(mapping) = mapping {
+                // Set up IDT vector with the I/O APIC. Map global_system_interrupt to any open IDT vector.
+                // Add IDT entry. Assign a closure owned by the RTL8139 that calls the actual interrupt handler for the device,
+                // as the procedure entrypoint in the IDT entry.
+
+                // SAFETY: Not really safe yet.
+                unsafe {
+                    let lapic_id = LOCAL_APIC.lock().id();
+                    let ioapic = IOAPIC.lock();
+
+                    // We know that 0x26 is empty.
+                    ioapic.remap(
+                        0,
+                        mapping.global_system_interrupt as u32,
+                        rtl8139.vector as u32,
+                    );
+                }
             }
+            nics.push(rtl8139)
         }
     }
-    v
+    nics.len()
 }
 
 pub struct RTL8139 {
     // This should ideally be made module private.
     pub(crate) pci: PCIDevice,
 
+    // The interrupt vector
+    pub(crate) vector: u8,
+
     // RTL8139 specific fields follow
     rx_buf: Vec<u8>,
 }
 
 impl RTL8139 {
-    fn init<'a>(mut pci: pci::PCIDevice) -> Result<RTL8139, ()> {
+    fn init<'a>(mut pci: pci::PCIDevice) -> Result<Arc<RTL8139>, ()> {
         // Use the rx buffer size 8192 + 16 + 1500 bytes. 8192 + 16 lets us write 0 for the buffer size
         // specification in the next step (receive configuration), and the extra 1500 bytes is for overflow when using
         // WRAP = 1 in the RCR.
@@ -62,7 +95,18 @@ impl RTL8139 {
             rx_buf.set_len(rx_buf_len);
         }
 
-        let mut rtl8139 = RTL8139 { pci, rx_buf };
+        // Everything "works" even though rtl8139 is not mutable because we don't
+        // properly do any mutual exclusion for `out` and `in` calls.
+        // Things will break when we have processes transmitting and
+        // receiving concurrently.
+        // TODO: Put the device behind a proper lock.
+        //       Need to design the locking mechanism first.
+        let rtl8139 = RTL8139 {
+            pci,
+            rx_buf,
+            vector: 0x26, // We magically know that this vector is empty, for now.
+        };
+        let rtl8139 = Arc::new(rtl8139);
 
         // Enable bus mastering and IOEN. This lets PCI device to perform DMA.
         rtl8139.pci.write_control_register(0x0005, 0);
@@ -76,12 +120,11 @@ impl RTL8139 {
         unsafe {
             rtl8139.outb(REG_COMMAND, 0x10);
             while rtl8139.inb(REG_COMMAND) & 0x10 != 0 {
-                spin_loop_hint();
+                spin_loop();
             }
         };
 
         // Init recv buffer
-        // TODO: get physical address of rx_buf. This will require additions to virtual mem code.
         let rx_buf_addr = rtl8139.rx_buf.as_ptr();
         let rx_buf_addr = mm::phys_addr(rx_buf_addr);
         unsafe { rtl8139.outl(REG_RBSTART, rx_buf_addr as u32) }
@@ -148,32 +191,59 @@ impl RTL8139 {
         port::outw(self.ioaddr(offset), data)
     }
 
+    unsafe fn inw(&self, offset: u16) -> u16 {
+        port::inw(self.ioaddr(offset))
+    }
+
     unsafe fn outl(&self, offset: u16, data: u32) {
         port::outl(self.ioaddr(offset), data)
     }
+
+    fn handle_interrupt(&self) {
+        // SAFETY: Not confirmed to be safe yet.
+        let status = unsafe { self.inw(REG_ISR) };
+
+        // Reset status register so that another frame can be sent / received.
+        // SAFETY: Not confirmed to be safe yet.
+        unsafe { self.outw(REG_ISR, 0x05) }
+
+        if status & 0x1 == 0x1 {
+            writeln!(
+                serial::Handle,
+                "[INFO] IRQ for RTL8139, bus {}, device {}",
+                self.pci.bus_number,
+                self.pci.device_number
+            );
+        }
+
+        if status & 0x4 == 0x4 {
+            // not supported yet
+        }
+    }
 }
 
-// Note: The struct which represents a single RTL8139 can solely own all the data related to it.
-//       It should be put behind a WithSpinLock<T> or better another locking structure with queuing semantics
-//       so that both upper-half and lower-half can access it, but not simultaneously (locking structs imply RefCell<T>)
-//
-//       The IRQ handler should not be a static Fn but a heap-allocated closure containing the call to the RTL8139{}
-//       method. For each initialized RTL8139 a closure should be heap-allocated and it's address (function pointer)
-//       should be registered to the entity that owns the IRQ number.
-//
-//       The IRQ number should be owned by the PCI driver. The PCI driver should also have a 'static lifetime
-//       so that the IRQ handling function can reference it (in turn the IRQ handling function needs to be a 'static Fn
-//       so that the IRQ hander asm shim can link to it :rolling_eyes:)
-
-// TODO: write actual code for ISR handler.
-//       This function should
-//       1. Figure out what kind of event woke us up by reading the interrupt status register.
-//          Interrupt Status Register outw(0x3e, 0x5)
-//       2. Handle the event.
-//       3. Clear the corresponding bit in the interrupt status reg.
-// This should be per-rtl8139 instead of a single shared public func.
+// This function should be called from the ISR for all RTL8139s, and should determine which one
+// got the interrupt.
+// TODO: This can be made into a common stub handler for all (PCI) devices.
+//       PCIDevice should own each of the per-device structs as trait objects, as well as
+//       the vector number.
+//       ISRs in isr.s would be defined (generated by a macro at compile time) for each *vector*, instead of each device type.
+//       ISRs will call the common stub handler, passing the vector as an argument like how it's done below.
 #[no_mangle]
-pub fn rtl8139_handler() {
+pub extern "C" fn rtl8139_handler(vector: u64) {
     // This is bad
-    writeln!(serial::Handle, "IRQ for RTL8139!");
+
+    // SAFETY: not safe. We will probably deadlock if we try to send and receive at the same time.
+    let nics = unsafe { NICS.lock() };
+    for n in nics.iter() {
+        if n.vector != vector as u8 {
+            continue;
+        }
+        n.handle_interrupt()
+    }
+
+    unsafe {
+        let lapic = LOCAL_APIC.lock();
+        lapic.end_of_interrupt();
+    }
 }

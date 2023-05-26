@@ -31,8 +31,8 @@ struct IDTR {
 
 type IDT = vec::Vec<u128>;
 
-pub fn init(madt: acpi::MADT) -> u32 {
-    let mut idt = unsafe { IDT.lock()};
+pub fn init(madt: &acpi::MADT) -> u32 {
+    let mut idt = unsafe { IDT.lock() };
     // Set up each fault and IRQ handler.
     // TODO: make IRQ handlers pluggable from outside this module.
     // page fault handler
@@ -88,7 +88,6 @@ pub fn init(madt: acpi::MADT) -> u32 {
     }
 
     // rtl8139 MSI interrupt
-    // TODO: RTL8139 doesn't support MSI according to the PCI configuration space. This code is wrong.
     {
         let mut descriptor: u128 = 0;
         let handler = rtl8139_isr as usize;
@@ -117,7 +116,7 @@ pub fn init(madt: acpi::MADT) -> u32 {
     let ioapic = IOAPIC::new(madt.ioapic_addr);
     // Don't consider global interrupt base for now.
     let lapic_id = lapic.id();
-    ioapic.remap(lapic_id);
+    ioapic.remap_all(lapic_id);
 
     unsafe {
         let mut static_ioapic = IOAPIC.lock();
@@ -210,34 +209,46 @@ impl IOAPIC {
         }
     }
 
-    fn remap(&self, lapic_id: u32) {
+    pub(crate) fn remap(&self, lapic_id: u32, int_signal: u32, vector: u32) {
+        let low = 0x10 + int_signal * 2;
+        let high = 0x10 + int_signal * 2 + 1;
+        self.write(low, vector);
+        self.write(high, (lapic_id << 24) & 0x0f000000);
+    }
+
+    fn remap_all(&self, lapic_id: u32) {
         // PS/2 keyboard
-        self.write(0x12, 0x21);
-        self.write(0x13, (lapic_id << 24) & 0x0f000000);
+        // self.write(0x12, 0x21);
+        // self.write(0x13, (lapic_id << 24) & 0x0f000000);
+        self.remap(0, 1, 0x21);
 
         // PIT
         // The following assumes that PIT is wired to ISA line 0 and remapped to line 2 of I/O APIC; confirmed from MADT
         // TODO: parse MADT for remappings on boot.
         // Also, we mask PIT until it is properly initialized later.
-        self.write(0x14, 0x10020);
-        self.write(0x15, (lapic_id << 24) & 0x0f000000);
+        // self.write(0x14, 0x10020);
+        // self.write(0x15, (lapic_id << 24) & 0x0f000000);
+        self.remap(lapic_id, 2, 0x10020);
 
         // COM 1, 3
-        self.write(0x18, 0x24);
-        self.write(0x19, (lapic_id << 24) & 0x0f000000);
+        // self.write(0x18, 0x24);
+        // self.write(0x19, (lapic_id << 24) & 0x0f000000);
+        self.remap(lapic_id, 4, 0x24);
 
         // RTL8139
         // On ISA 0xb according to PCI configuration space.
-        // Mapped to  I/O APIC line 0xb, according to MADT.
+        // Mapped to I/O APIC line 0xb, according to MADT.
         // TODO: initialize this in the RTL8139 driver after we can read the above info.
-        self.write(0x26, 0x26);
-        self.write(0x27, (lapic_id << 24) & 0x0f000000);
+        // self.write(0x26, 0x26);
+        // self.write(0x27, (lapic_id << 24) & 0x0f000000);
+        // Commented out because we remap this dynamically on device initialization.
+        // self.remap(lapic_id, 11, 0x26);
 
         // Mouse (masked)
         // TODO: how do we know that the mouse is on I/O APIC line 12?
         self.write(0x28, 0x100FF);
         self.write(0x29, (lapic_id << 24) & 0x0f000000);
-
+        self.remap(lapic_id, 12, 0x100ff);
 
         // Spurious Interrupt Vector
         self.write(0xf0, (0x1 << 8) + 0xff);
@@ -270,7 +281,7 @@ impl LocalAPIC {
     }
 
     /// Get local APIC ID of executing processor.
-    fn id(&self) -> u32 {
+    pub(crate) fn id(&self) -> u32 {
         self.read(0x20)
     }
 
@@ -284,5 +295,9 @@ impl LocalAPIC {
     fn write(&self, index: usize, value: u32) {
         let mut reg = (self.base_addr + index as usize) as *mut u32;
         unsafe { write_volatile(reg, value) }
+    }
+
+    pub fn end_of_interrupt(&self) {
+        self.write(0xb0, 0)
     }
 }

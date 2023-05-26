@@ -52,8 +52,8 @@ impl PCI {
 /// This represents a PCI device on a PCI bus.
 /// TODO: Consider field visibility.
 pub struct PCIDevice {
-    bus_number: u16,
-    device_number: u16,
+    pub(crate) bus_number: u16,
+    pub(crate) device_number: u16,
 
     device_id: u16,
     vendor_id: u16,
@@ -61,7 +61,7 @@ pub struct PCIDevice {
     subsystem_vendor_id: u16,
 
     interrupt_pin: u8,
-    interrupt_line: u8,
+    pub(crate) interrupt_line: u8,
 
     msi_capability_pointer: Option<u16>,
 }
