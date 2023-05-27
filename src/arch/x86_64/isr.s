@@ -1,3 +1,32 @@
+.macro pusha
+    pushq %rax
+    pushq %rcx
+    pushq %rdx
+    pushq %rdi
+    pushq %rsi
+    pushq %rbp
+    pushq %rsp
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+.endm
+
+.macro popa
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rsp
+    popq %rbp
+    popq %rsi
+    popq %rdi
+    popq %rdx
+    popq %rcx
+    popq %rax
+.endm
+
+
 .code64
 .section .text
 
@@ -181,6 +210,31 @@ rtl8139_isr:
     popq %rax
     sti
     iretq
+
+.macro gen_device_isrs from=0, to
+    pushq $\from /* vector: u64,  96(%rsp) */
+    jmp device_isr_common
+    .if \to-\from
+    gen_device_isrs "(\from+1)", \to
+    .endif
+.endm
+
+.global device_isr_entries
+device_isr_entries:
+gen_device_isrs to=63
+.fill 128, 1, 0xcc /* To ensure near jump is used */
+
+device_isr_common:
+    cli
+    pusha
+    cld
+    mov 88(%rsp), %rdi
+    call device_handler
+    popa
+    addq $8, %rsp /* pop vector */
+    sti
+    iretq
+
 
 .global reload_idt
 reload_idt:

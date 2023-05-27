@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use core::fmt::Write;
 use core::hint::spin_loop;
 
-use crate::arch::x86_64::interrupt::{IOAPIC, LOCAL_APIC};
+use crate::arch::x86_64::interrupt::{register_handler, IOAPIC, LOCAL_APIC};
 use crate::arch::x86_64::{mm, port};
 use crate::drivers::pci::PCIDevice;
 use crate::drivers::{acpi, pci};
@@ -50,15 +50,15 @@ pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
                 .filter(|x| x.irq_number == rtl8139.pci.interrupt_line)
                 .next();
             if let Some(mapping) = mapping {
-                // Set up IDT vector with the I/O APIC. Map global_system_interrupt to any open IDT vector.
-                // Add IDT entry. Assign a closure owned by the RTL8139 that calls the actual interrupt handler for the device,
-                // as the procedure entrypoint in the IDT entry.
+                // Register the interrupt handler.
+                register_handler(rtl8139.vector, rtl8139_handler);
 
                 // SAFETY: Not really safe yet.
                 unsafe {
                     let lapic_id = LOCAL_APIC.lock().id();
                     let ioapic = IOAPIC.lock();
 
+                    // Set up IDT vector with the I/O APIC. Map global_system_interrupt to any open IDT vector.
                     // We know that 0x26 is empty.
                     ioapic.remap(
                         0,

@@ -16,11 +16,18 @@ extern "C" {
     fn reload_idt(idtr: *const IDTR);
 }
 
+extern "C" {
+    static mut device_isr_entries: [[u8; 7]; 96];
+}
+
 pub static mut IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC::new(0));
 
 pub static mut LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC::new(0));
 
 static mut IDT: WithSpinLock<[u128; 40]> = WithSpinLock::new([0; 40]);
+
+// TODO: lock this properly
+static mut IRQ_HANDLERS: [usize; 128] = [0; 128];
 
 #[repr(C)]
 #[repr(packed)]
@@ -87,10 +94,11 @@ pub fn init(madt: &acpi::MADT) -> u32 {
         idt[0x24] = descriptor;
     }
 
-    // rtl8139 MSI interrupt
+    // Interrupt 0x26
+    // TODO: set up for all interrupts in 0x20-0x7f inclusive.
     {
         let mut descriptor: u128 = 0;
-        let handler = rtl8139_isr as usize;
+        let handler = unsafe { &device_isr_entries[0x26] } as *const u8 as usize;
         descriptor |= (handler & 0xffff) as u128; // offset 15:0
         descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
         descriptor |= 0x8 << 16; // segment selector
@@ -164,6 +172,27 @@ unsafe extern "C" fn com0_handler() {
     lapic.write(0xb0, 0)
 }
 
+pub fn register_handler(vector: u8, handler: extern "C" fn(u64)) {
+    // SAFETY: not safe yet
+    unsafe {
+        IRQ_HANDLERS[vector as usize] = handler as usize;
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn device_handler(vector: u64) {
+    // SAFETY: NOT safe, because the static mut [usize; 128] is not behind any lock.
+    let handler = unsafe { IRQ_HANDLERS[vector as usize] } as *const ();
+
+    // SAFETY: All code that has been written to IRQ_HANDLERS should have made sure that what
+    //         valid they write are function address.
+    let handler = unsafe {
+        // Should `handler` be null checked? Or is it alright to just page fault.
+        core::mem::transmute::<*const (), fn(u64)>(handler)
+    };
+    handler(vector)
+}
+
 /// Mask 8259 PIC.
 fn mask_pic() {
     unsafe {
@@ -234,15 +263,6 @@ impl IOAPIC {
         // self.write(0x18, 0x24);
         // self.write(0x19, (lapic_id << 24) & 0x0f000000);
         self.remap(lapic_id, 4, 0x24);
-
-        // RTL8139
-        // On ISA 0xb according to PCI configuration space.
-        // Mapped to I/O APIC line 0xb, according to MADT.
-        // TODO: initialize this in the RTL8139 driver after we can read the above info.
-        // self.write(0x26, 0x26);
-        // self.write(0x27, (lapic_id << 24) & 0x0f000000);
-        // Commented out because we remap this dynamically on device initialization.
-        // self.remap(lapic_id, 11, 0x26);
 
         // Mouse (masked)
         // TODO: how do we know that the mouse is on I/O APIC line 12?
