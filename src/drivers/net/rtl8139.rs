@@ -1,5 +1,6 @@
 use alloc::boxed::Box;
 use alloc::sync::Arc;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use core::hint::spin_loop;
@@ -21,20 +22,38 @@ const RTL8139_VENDOR_ID: u16 = 0x10ec;
 /// Device ID of RTL8139. This is taken from the datasheet.
 const RTL8139_DEVICE_ID: u16 = 0x8139;
 
-/// Registers
-const REG_CONFIG_1: u16 = 0x52;
-
-const REG_COMMAND: u16 = 0x37;
-
+// Registers
+// RBSTART (Receive Buffer Start Address): 0x30-0x33
 const REG_RBSTART: u16 = 0x30;
 
-// Interrupt Mask Register
+// CR (Command Register): 0x37
+const REG_COMMAND: u16 = 0x37;
+
+// CAPR (Current Address of Packet Read): 0x38-0x39
+const REG_CAPR: u16 = 0x38;
+
+// CBR (Current Buffer Address): 0x3a-0x3b
+const REG_CBR: u16 = 0x3a;
+
+// IMR (Interrupt Mask Register): 0x3c-0x3d
 const REG_IMR: u16 = 0x3c;
 
-// Interrupt Status Register
+// ISR (Interrupt Status Register): 0x3e-0x3f
 const REG_ISR: u16 = 0x3e;
 
+// TCR (Transmit Configuration Register): 0x40-0x43
+const REG_TCR: u16 = 0x40;
+
+// RCR (Receive Configuration Register): 0x44-0x47
 const REG_RCR: u16 = 0x44;
+
+// CONFIG1: 0x52
+const REG_CONFIG_1: u16 = 0x52;
+
+// Size of Rx buffer(s).
+// The size is 8192 + 16 + 1500 bytes to a) write a `0` to the Rx Buffer Length field in the RCR and b) to allow for
+// WRAP mode operation.
+const RX_BUF_SIZE: usize = 8192 + 16 + 1500;
 
 /// Initializes all RTL8139s on the PCI bus.
 pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
@@ -73,6 +92,13 @@ pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
     nics.len()
 }
 
+/// Double-word aligned byte array type for use as the receive buffer.
+#[repr(C, align(32))]
+#[derive(Clone)]
+struct RxBuf {
+    buf: [u8; RX_BUF_SIZE],
+}
+
 pub struct RTL8139 {
     // This should ideally be made module private.
     pub(crate) pci: PCIDevice,
@@ -80,20 +106,17 @@ pub struct RTL8139 {
     // The interrupt vector
     pub(crate) vector: u8,
 
-    // RTL8139 specific fields follow
-    rx_buf: Vec<u8>,
+    // The RX buffer
+    rx_buf: Box<RxBuf>,
 }
 
 impl RTL8139 {
     fn init<'a>(mut pci: pci::PCIDevice) -> Result<Arc<RTL8139>, ()> {
-        // Use the rx buffer size 8192 + 16 + 1500 bytes. 8192 + 16 lets us write 0 for the buffer size
-        // specification in the next step (receive configuration), and the extra 1500 bytes is for overflow when using
-        // WRAP = 1 in the RCR.
-        let rx_buf_len = 8192 + 16 + 1500;
-        let mut rx_buf = Vec::<u8>::with_capacity(rx_buf_len);
-        unsafe {
-            rx_buf.set_len(rx_buf_len);
-        }
+        let mut rx_buf = Box::<RxBuf>::new_uninit();
+
+        // Safety: This is a buffer that will be written to later by the device, so we don't care about the data
+        //         in it.
+        let mut rx_buf = unsafe { rx_buf.assume_init() };
 
         // Everything "works" even though rtl8139 is not mutable because we don't
         // properly do any mutual exclusion for `out` and `in` calls.
@@ -125,7 +148,7 @@ impl RTL8139 {
         };
 
         // Init recv buffer
-        let rx_buf_addr = rtl8139.rx_buf.as_ptr();
+        let rx_buf_addr = rtl8139.rx_buf.buf.as_ptr() as *const u8;
         let rx_buf_addr = mm::phys_addr(rx_buf_addr);
         unsafe { rtl8139.outl(REG_RBSTART, rx_buf_addr as u32) }
 
@@ -204,15 +227,17 @@ impl RTL8139 {
         let status = unsafe { self.inw(REG_ISR) };
 
         // Reset status register so that another frame can be sent / received.
-        // SAFETY: Not confirmed to be safe yet.
+        // SAFETY: Not confirmed to be safe yet. The same for all following port IO calls.
         unsafe { self.outw(REG_ISR, 0x05) }
 
         if status & 0x1 == 0x1 {
+            let current_buffer_address = unsafe { self.inw(REG_CBR) };
+            let current_address_of_packet_read = unsafe { self.inw(REG_CAPR) };
             writeln!(
                 serial::Handle,
-                "[INFO] IRQ for RTL8139, bus {}, device {}",
-                self.pci.bus_number,
-                self.pci.device_number
+                "CAPR: {:x}, CBR: {:x}\r",
+                current_buffer_address,
+                current_address_of_packet_read,
             );
         }
 

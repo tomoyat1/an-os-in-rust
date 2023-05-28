@@ -7,6 +7,7 @@
 #![allow(unused)]
 #![allow(unused_unsafe)]
 #![feature(drain_filter)]
+#![feature(new_uninit)]
 
 extern crate alloc;
 extern crate bootlib;
