@@ -50,10 +50,12 @@ const REG_RCR: u16 = 0x44;
 // CONFIG1: 0x52
 const REG_CONFIG_1: u16 = 0x52;
 
+const RX_BUF_SIZE: usize = 8192;
+
 // Size of Rx buffer(s).
 // The size is 8192 + 16 + 1500 bytes to a) write a `0` to the Rx Buffer Length field in the RCR and b) to allow for
 // WRAP mode operation.
-const RX_BUF_SIZE: usize = 8192 + 16 + 1500;
+const RX_BUF_SIZE_WITH_WRAP: usize = RX_BUF_SIZE + 16 + 1500;
 
 /// Initializes all RTL8139s on the PCI bus.
 pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
@@ -93,10 +95,10 @@ pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
 }
 
 /// Double-word aligned byte array type for use as the receive buffer.
-#[repr(C, align(32))]
+#[repr(C, align(4))]
 #[derive(Clone)]
 struct RxBuf {
-    buf: [u8; RX_BUF_SIZE],
+    buf: [u8; RX_BUF_SIZE_WITH_WRAP],
 }
 
 pub struct RTL8139 {
@@ -177,7 +179,7 @@ impl RTL8139 {
         // 0x0005 sets the ROK and TOK bits, which means we get interrupts when successfully
         // send or receive packets.
         unsafe {
-            rtl8139.outw(REG_IMR, 0x0005);
+            rtl8139.outw(REG_IMR, 0x0005 | 1 << 4);
         }
 
         Ok(rtl8139)
@@ -226,24 +228,81 @@ impl RTL8139 {
         // SAFETY: Not confirmed to be safe yet.
         let status = unsafe { self.inw(REG_ISR) };
 
+        writeln!(serial::Handle, "ISR: 0x{:x}\n", status);
+
         // Reset status register so that another frame can be sent / received.
         // SAFETY: Not confirmed to be safe yet. The same for all following port IO calls.
         unsafe { self.outw(REG_ISR, 0x05) }
 
         if status & 0x1 == 0x1 {
-            let current_buffer_address = unsafe { self.inw(REG_CBR) };
-            let current_address_of_packet_read = unsafe { self.inw(REG_CAPR) };
-            writeln!(
-                serial::Handle,
-                "CAPR: {:x}, CBR: {:x}\r",
-                current_buffer_address,
-                current_address_of_packet_read,
-            );
+            self.handle_receive()
         }
 
         if status & 0x4 == 0x4 {
             // not supported yet
         }
+    }
+
+    fn handle_receive(&self) {
+        // Current Buffer Address
+        let cbr = unsafe { self.inw(REG_CBR) } as usize;
+
+        // Current Address of Packet Read
+        // This register is offset by -0x10, so adjust.
+        let capr = unsafe { self.inw(REG_CAPR) } as usize + 0x10;
+        let mut capr = capr % RX_BUF_SIZE;
+
+        // The whole unread portion of the rx buffer. May contain multiple frames.
+        let mut rx = if cbr < capr {
+            &self.rx_buf.buf[capr..RX_BUF_SIZE + cbr]
+        } else {
+            &self.rx_buf.buf[capr..cbr]
+        };
+        loop {
+            // Receive status register.
+            let (rsr, remaining) = rx.split_at(2);
+            let rsr = {
+                // Panics on failure to get 2 bytes off of the rx buffer.
+                // This should not happen.
+                let rsr = rsr.try_into();
+                let rsr = rsr.unwrap();
+                u16::from_le_bytes(rsr)
+            };
+
+            // Frame size.
+            let (frame_size, remaining) = remaining.split_at(2);
+
+            // `frame_size` is the size of just the following received frame.
+            let frame_size = {
+                let fs = frame_size.try_into();
+                let fs = fs.unwrap();
+                u16::from_le_bytes(fs)
+            };
+            let (frame, remaining) = remaining.split_at(frame_size as usize);
+            // Process frame
+            writeln!(
+                serial::Handle,
+                "RSR: {:x}, SIZE: {:x}, CAPR: {:x}, CBR: {:x}",
+                rsr,
+                frame_size,
+                capr,
+                cbr,
+            );
+
+            capr = ((capr + 4 + frame_size as usize + 3) & !3) % RX_BUF_SIZE;
+            rx = remaining;
+
+            let cr = unsafe { self.inb(REG_COMMAND) };
+            if cr & 0x1 != 0x1 {
+                break;
+            };
+        }
+
+        // The CAPR register is bugged (at least in QEMU, and presumably in real HW)
+        // so it reads/writes numbers that are off by -0x10.
+        unsafe { self.outw(REG_CAPR, capr as u16 - 0x10) }
+
+        // TODO: loop until CR.BUFE == 0.
     }
 }
 
@@ -264,7 +323,7 @@ pub extern "C" fn rtl8139_handler(vector: u64) {
         if n.vector != vector as u8 {
             continue;
         }
-        n.handle_interrupt()
+        n.handle_interrupt();
     }
 
     unsafe {
