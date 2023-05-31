@@ -36,6 +36,8 @@ use crate::kernel::clock::Clock;
 
 mod locking;
 
+mod net;
+
 #[no_mangle]
 #[linkage = "external"]
 /// start() is the entry point for kernel code.
@@ -57,15 +59,15 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Wait for 1000ms
     clock.sleep(1000);
 
-    serial::tmp_write_com1(b"Done");
+    serial::tmp_write_com1(b"Done\n");
 
     // Initialize PCI devices
     pci::init(lapic_id);
     let nics = rtl8139::init(&madt.interrupt_mappings);
     if nics == 1 {
-        serial::tmp_write_com1(b"\r\nRTL8139 FOUND\r\n");
+        serial::tmp_write_com1(b"RTL8139 FOUND\n");
     } else {
-        serial::tmp_write_com1(b"\r\nNO NIC\r\n")
+        serial::tmp_write_com1(b"NO NIC\n")
     }
 
     // Start scheduler

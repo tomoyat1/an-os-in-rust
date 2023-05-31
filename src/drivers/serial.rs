@@ -9,6 +9,11 @@ pub fn init() {
     let divisor: u16 = 0x2;
 
     let com = Com::new(COM1_PORT, divisor);
+
+    // Set New line mode (set LNM).
+    // This doesn't seem to work in the QEMU GUI serial console.
+    com.write(b"\x1b[20h");
+
     unsafe {
         let mut com1 = COM1.lock();
         *com1 = Some(com);
@@ -95,7 +100,15 @@ impl Com {
     /// - Add a buffer to store bytes until port is ready for more data. Drop further outgoing data
     ///   if this buffer is full.
     fn write_byte(&self, byte: u8) {
-        self.outb(0, byte);
+        match byte {
+            b'\n' => {
+                self.outb(0, b'\r');
+                self.outb(0, b'\n');
+            }
+            _ => {
+                self.outb(0, byte);
+            }
+        }
     }
 
     /// Reads a byte from serial port `self`

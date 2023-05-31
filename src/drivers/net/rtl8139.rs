@@ -9,6 +9,7 @@ use crate::arch::x86_64::interrupt::{register_handler, IOAPIC, LOCAL_APIC};
 use crate::arch::x86_64::{mm, port};
 use crate::drivers::pci::PCIDevice;
 use crate::drivers::{acpi, pci};
+use crate::net::ethernet;
 
 // For debugging
 use crate::drivers::serial;
@@ -292,6 +293,22 @@ impl RTL8139 {
             capr = ((capr + 4 + frame_size as usize + 3) & !3) % RX_BUF_SIZE;
             rx = remaining;
 
+            // write this common ethernet code in the driver for testing
+            match ethernet::Frame::from_bytes(frame) {
+                Ok(frame) => {
+                    writeln!(
+                        serial::Handle,
+                        "src: {}, dest: {}, EtherType: {}\n",
+                        &frame.header.src_mac,
+                        &frame.header.dest_mac,
+                        &frame.header.ethertype,
+                    );
+                }
+                Err(s) => {
+                    writeln!(serial::Handle, "{}\n", s);
+                }
+            }
+
             let cr = unsafe { self.inb(REG_COMMAND) };
             if cr & 0x1 != 0x1 {
                 break;
@@ -301,8 +318,6 @@ impl RTL8139 {
         // The CAPR register is bugged (at least in QEMU, and presumably in real HW)
         // so it reads/writes numbers that are off by -0x10.
         unsafe { self.outw(REG_CAPR, capr as u16 - 0x10) }
-
-        // TODO: loop until CR.BUFE == 0.
     }
 }
 
