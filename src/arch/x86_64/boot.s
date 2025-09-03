@@ -21,13 +21,18 @@ boot_heap_pdt:
 .global boot_pt
 boot_pt:
     .skip 0x1000
+
+# This is unused, and at the wrong address.
+# This cannot be static H/W memory mapping depends on the machine we run on.
 .global heap_bottom
 heap_bottom:
 
 .section .bootstrap_stack, "aw", @nobits
-boot_stack_bottom:
-    .skip 16384
+.global boot_stack_top
 boot_stack_top:
+    .skip 0x2000
+.global boot_stack_bottom
+boot_stack_bottom:
 
 .code64
 .section .low.text, "ax"
@@ -159,7 +164,7 @@ _low_start:
 
 .section .text
 4:
-    mov $boot_stack_top, %rsp
+    mov $boot_stack_bottom, %rsp
 
     # Call rust kernel entrypoint.
     # First parameter for start(boot_data: *const bootloader::boot_types::BootData); should be address to BootData struct.

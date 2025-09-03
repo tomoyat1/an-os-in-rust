@@ -23,6 +23,7 @@ SECTIONS
 	}
 	.bss ALIGN(4K) : AT (ADDR (.bss) - 0xFFFFFFFF80000000) {
 		*(COMMON)
+		. = ALIGN(0x2000);
 		*(.bootstrap_stack)
 		*(.bss)
 	}
