@@ -180,37 +180,6 @@ com0_isr:
     sti
     iretq
 
-.global rtl8139_isr
-rtl8139_isr:
-    cli
-    pushq %rax
-    pushq %rcx
-    pushq %rdx
-    pushq %rdi
-    pushq %rsi
-    pushq %rbp
-    pushq %rsp
-    pushq %r8
-    pushq %r9
-    pushq %r10
-    pushq %r11
-    cld
-    movq $0x26, %rdi # vector: u64
-    call rtl8139_handler
-    popq %r11
-    popq %r10
-    popq %r9
-    popq %r8
-    popq %rsp
-    popq %rbp
-    popq %rsi
-    popq %rdi
-    popq %rdx
-    popq %rcx
-    popq %rax
-    sti
-    iretq
-
 .macro gen_device_isrs from=0, to
     pushq $\from /* vector: u64,  96(%rsp) */
     jmp device_isr_common
@@ -230,8 +199,8 @@ device_isr_common:
     cld
     mov 88(%rsp), %rdi
     call device_handler
-    popa
     addq $8, %rsp /* pop vector */
+    popa
     sti
     iretq
 

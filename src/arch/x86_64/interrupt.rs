@@ -12,7 +12,6 @@ extern "C" {
     fn ps2_keyboard_isr();
     fn pit_isr();
     fn com0_isr();
-    fn rtl8139_isr();
     fn reload_idt(idtr: *const IDTR);
 }
 
