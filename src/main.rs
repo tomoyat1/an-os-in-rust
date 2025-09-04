@@ -88,15 +88,25 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 #[panic_handler]
 /// panic() handles panics!()'s in the kernel. These are called "kernel panic"s.
 fn panic(info: &PanicInfo) -> ! {
-    serial::init();
-    match info.message() {
-        None => {
-            writeln!(serial::Handle, "Failed to get panic Argument");
-        }
-        Some(args) => {
-            core::fmt::write(&mut serial::Handle, *args);
-        }
+    fn do_panic(info: &PanicInfo) -> Option<()> {
+        serial::init();
+        let args = info.message()?;
+        let location = info.location()?;
+        writeln!(
+            serial::Handle,
+            "file: {}, line: {}, col: {}",
+            location.file(),
+            location.line(),
+            location.column(),
+        );
+        core::fmt::write(&mut serial::Handle, *args);
+        Some(())
     };
+    let r = do_panic(info);
+    if r == None {
+        writeln!(serial::Handle, "Failed to get panic message");
+    }
+
     // TODO: Paint screen red.
     loop {}
 }
