@@ -32,7 +32,9 @@ use drivers::serial;
 mod mm;
 
 mod kernel;
+use crate::kernel::clock;
 use crate::kernel::clock::Clock;
+use kernel::sched::task;
 
 mod locking;
 
@@ -59,6 +61,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Wait for 1000ms
     clock.sleep(1000);
 
+    task::init_idle_task();
+    task::debug_task(0);
+
     serial::tmp_write_com1(b"Done\n");
 
     // Initialize PCI devices
@@ -70,18 +75,28 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         serial::tmp_write_com1(b"NO NIC\n")
     }
 
-    // Start scheduler
+    // Create another task to demonstrate switching.
+    task::new_task();
+    task::debug_task(1);
 
-    // Scheduler should not return;
-    // panic!("Scheduler has returned when it shouldn't have");
+    // Placeholder code for kernel idle task.
+    // TODO: this function starts the scheduler?
     loop {
-        let mut f1 = 1;
-        let mut f2 = 1;
-        for _ in 0..5 {
-            let t = f1 + f2;
-            f1 = f2;
-            f2 = t;
-        }
+        // clock.sleep(1000);
+        let current = task::current_task();
+        writeln!(serial::Handle, "Yo! from task {:}", current);
+        task::switch_to((current + 1) % 2)
+    }
+}
+
+#[no_mangle]
+#[linkage = "external"]
+/// another_task() is a placeholder for actual code that a newly created task would run.
+pub unsafe extern "C" fn another_task() {
+    loop {
+        let current = task::current_task();
+        writeln!(serial::Handle, "Yo! from task {:}", current);
+        task::switch_to((current + 1) % 2)
     }
 }
 

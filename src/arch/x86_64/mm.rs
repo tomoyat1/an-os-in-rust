@@ -33,7 +33,7 @@ pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
     // Map first 2 GiB of physical memory to upper 2 GiB.
     // First GiB is already done, so do the latter 1 GiB.
     let pdpt_idx: usize = ((KERNEL_BASE + (1 << 30)) & MASK_38_30) >> 30;
-    let pdpte = 1 << 30 as u64 & MASK_47_30 as u64 | 0x83;
+    let pdpte = 1 << 30u64 & MASK_47_30 as u64 | 0x83;
     boot_pdpt[pdpt_idx] = pdpte;
 
     // Map UEFI runtime service memory to space below kernel.
