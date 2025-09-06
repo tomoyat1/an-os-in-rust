@@ -12,6 +12,7 @@ use core::cell::RefCell;
 use core::fmt::Write;
 use core::iter::Take;
 use core::mem::size_of;
+use core::{mem, ptr};
 
 const KERNEL_STACK_SIZE: usize = 0x2000;
 
@@ -110,17 +111,13 @@ pub(crate) fn init_idle_task() {
     //         by the GlobalAllocator, even if it wasn't.
     let mut idle_task_stack = unsafe { Box::from_raw(idle_task_stack) };
     let mut cr3: usize;
-    unsafe {
-        asm!(
-        "mov rax, cr3",
-        out("rax") cr3,
-        );
-    }
     let mut rsp: usize;
     unsafe {
         asm!(
-        "mov rax, rsp",
-        out("rax") rsp,
+        "mov r8, cr3",
+        "mov r9, rsp",
+        out("r8") cr3,
+        out("r9") rsp,
         );
     }
     idle_task_stack.regs.cr3 = cr3;
@@ -150,28 +147,20 @@ pub(crate) fn new_task() -> usize {
         (*ptr).stack = [0; KERNEL_STACK_SIZE - size_of::<Registers>()];
 
         // I hope there's a cleaner way to do this...
-        let entry_addr = (_task_entry as usize).to_le_bytes();
-        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 8] = entry_addr[0];
-        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 7] = entry_addr[1];
-        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 6] = entry_addr[2];
-        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 5] = entry_addr[3];
-        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 4] = entry_addr[4];
-        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 3] = entry_addr[5];
-        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 2] = entry_addr[6];
-        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 1] = entry_addr[7];
+        let entry_addr = mem::transmute::<&u8, *mut usize>(
+            &(*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 8],
+        );
+        ptr::write(entry_addr, _task_entry as usize);
         Box::from_raw(ptr)
     };
     let id = task_list.new_task(stack);
     let mut task = &mut task_list.tasks[id];
-    let task_id_bytes = id.to_le_bytes();
-    task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 16] = task_id_bytes[0];
-    task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 15] = task_id_bytes[1];
-    task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 14] = task_id_bytes[2];
-    task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 13] = task_id_bytes[3];
-    task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 12] = task_id_bytes[4];
-    task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 11] = task_id_bytes[5];
-    task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 10] = task_id_bytes[6];
-    task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 9] = task_id_bytes[7];
+    unsafe {
+        let task_id = mem::transmute(
+            &task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 16],
+        );
+        ptr::write(task_id, id)
+    }
     task.kernel_stack.regs.stack_top = &(task.kernel_stack.stack
         [KERNEL_STACK_SIZE - size_of::<Registers>() - 8 - size_of::<usize>() * 6])
         as *const u8 as usize;
