@@ -34,7 +34,8 @@ mod mm;
 mod kernel;
 use crate::kernel::clock;
 use crate::kernel::clock::Clock;
-use kernel::sched::task;
+use crate::kernel::sched;
+use crate::kernel::sched::task;
 
 mod locking;
 
@@ -85,7 +86,8 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         // clock.sleep(1000);
         let current = task::current_task();
         writeln!(serial::Handle, "Yo! from task {:}", current);
-        task::switch_to((current + 1) % 2)
+        let scheduler = sched::handle();
+        scheduler.switch()
     }
 }
 
@@ -96,7 +98,8 @@ pub unsafe extern "C" fn another_task() {
     loop {
         let current = task::current_task();
         writeln!(serial::Handle, "Yo! from task {:}", current);
-        task::switch_to((current + 1) % 2)
+        let scheduler = sched::handle();
+        scheduler.switch()
     }
 }
 

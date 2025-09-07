@@ -192,10 +192,13 @@ _do_switch:
     popq %rbx
     popq %rbp
 
+    mov %rdx, %rax
+
     retq
 
 .global _task_entry
 .type _task_entry, @function
 _task_entry:
     movq %rbp, %rdi
+    movq %rax, %rsi
     call task_entry

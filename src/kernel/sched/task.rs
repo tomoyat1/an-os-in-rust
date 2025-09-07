@@ -1,6 +1,6 @@
 use crate::another_task;
 use crate::drivers::serial;
-use crate::locking::spinlock::WithSpinLock;
+use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use alloc::alloc::alloc;
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
@@ -12,7 +12,9 @@ use core::cell::RefCell;
 use core::fmt::Write;
 use core::iter::Take;
 use core::mem::size_of;
+use core::ptr::drop_in_place;
 use core::{mem, ptr};
+use spin::MutexGuard;
 
 const KERNEL_STACK_SIZE: usize = 0x2000;
 
@@ -20,7 +22,11 @@ extern "C" {
     #[link_name = "boot_stack_top"]
     static mut boot_stack: KernelStack;
 
-    fn _do_switch(from: *const KernelStack, to: *const KernelStack);
+    fn _do_switch(
+        from: *const KernelStack,
+        to: *const KernelStack,
+        task_list: *mut WithSpinLockGuard<TaskList>,
+    ) -> *mut WithSpinLockGuard<TaskList>;
 
     fn _task_entry();
 }
@@ -42,11 +48,23 @@ impl TaskList {
         }
     }
 
-    fn current_task(&self) -> Option<&Task> {
+    pub fn current_task(&self) -> Option<TaskHandle> {
+        let id = self.current?;
         match self.current {
-            Some(i) => Some(&self.tasks[i]),
+            Some(i) => Some(TaskHandle {
+                task_id: id,
+                kernel_stack: self.tasks[i].kernel_stack.as_ref(),
+            }),
             None => None,
         }
+    }
+
+    pub fn get(&self, id: usize) -> Option<TaskHandle> {
+        let task = self.tasks.get(id)?;
+        Some(TaskHandle {
+            task_id: id,
+            kernel_stack: task.kernel_stack.as_ref(),
+        })
     }
 
     fn new_task(&mut self, kernel_stack: Box<KernelStack>) -> usize {
@@ -59,6 +77,10 @@ impl TaskList {
         self.tasks[task_id].task_id = task_id;
         task_id
     }
+
+    pub fn len(&self) -> usize {
+        self.tasks.len()
+    }
 }
 #[repr(C)]
 pub(crate) struct Task {
@@ -67,24 +89,47 @@ pub(crate) struct Task {
 }
 
 impl Task {
-    fn switch_to(&self, to: &Task) {
+    // pub fn switch_to(&self, to: &Task, task_list: WithSpinLockGuard<TaskList>) {
+    //     // SAFETY: ???
+    //     let mut task_list = unsafe {
+    //         _do_switch(
+    //             self.kernel_stack.as_ref() as *const KernelStack,
+    //             to.kernel_stack.as_ref() as *const KernelStack,
+    //             task_list,
+    //         )
+    //     };
+    //
+    //     task_list.current = Some(to.task_id);
+    //     // TODO: Switch paging table.
+    // }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub(crate) struct TaskHandle {
+    pub task_id: usize,
+    kernel_stack: *const KernelStack,
+}
+
+impl TaskHandle {
+    pub fn switch_to(&self, to: TaskHandle, mut task_list: WithSpinLockGuard<TaskList>) {
         // SAFETY: ???
         unsafe {
-            asm!("cli");
-            _do_switch(
-                self.kernel_stack.as_ref() as *const KernelStack,
-                to.kernel_stack.as_ref() as *const KernelStack,
-            );
-            asm!("sti");
-        }
+            let task_list = ptr::read(_do_switch(
+                self.kernel_stack,
+                to.kernel_stack,
+                &mut task_list,
+            ));
+        };
 
-        unsafe { TASK_LIST.lock().current = Some(to.task_id) };
+        task_list.current = Some(to.task_id);
         // TODO: Switch paging table.
     }
 }
 
 /// Kernel context registers for saving when context switching.
 #[repr(C)]
+#[derive(Copy, Clone)]
 struct Registers {
     // TODO: move the following to architecture specific type and make Task generic
     /// `stack_top` is the value of the stack pointer register.
@@ -133,7 +178,8 @@ pub(crate) fn init_idle_task() {
 pub(crate) fn new_task() -> usize {
     let mut task_list = unsafe { TASK_LIST.lock() };
     let current_task = task_list
-        .current_task()
+        .tasks
+        .get(task_list.current.unwrap())
         .expect("New task creation attempted before boot task initialization.");
     let mut stack = unsafe {
         let layout = Layout::new::<KernelStack>();
@@ -169,11 +215,11 @@ pub(crate) fn new_task() -> usize {
 
 #[no_mangle]
 #[linkage = "external"]
-unsafe fn task_entry(task_id: usize) {
+unsafe fn task_entry(task_id: usize, task_list: *mut WithSpinLockGuard<TaskList>) {
     // Iff we are running this function, then we are running as a newly initialized task.
     // Set the current task as such.
-    unsafe {
-        let mut task_list = TASK_LIST.lock();
+    {
+        let mut task_list = unsafe { ptr::read(task_list) };
         task_list.current = Some(task_id);
     }
 
@@ -187,28 +233,6 @@ pub(crate) fn current_task() -> usize {
         .current_task()
         .expect("No tasks found. Maybe this is called before boot task initialization?");
     t.task_id
-}
-
-pub(crate) fn switch_to(to_id: usize) {
-    let (from, to) = {
-        let task_list = unsafe { TASK_LIST.lock() };
-        let from = task_list.current_task().unwrap() as *const Task;
-        let to = &task_list.tasks[to_id] as *const Task;
-        (from, to)
-    };
-    unsafe {
-        from.as_ref()
-            .expect("Unexpected null pointer to previous task struct")
-            .switch_to(
-                to.as_ref()
-                    .expect("Unexpected null pointer to next task struct."),
-            )
-    };
-
-    unsafe {
-        let mut task_list = TASK_LIST.lock();
-        task_list.current = Some(to_id);
-    }
 }
 
 pub(crate) fn debug_task(i: usize) {

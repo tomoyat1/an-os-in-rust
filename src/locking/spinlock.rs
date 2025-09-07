@@ -25,7 +25,7 @@ impl<A> WithSpinLock<A> {
 }
 
 pub struct WithSpinLockGuard<'a, T> {
-    inner: spin::MutexGuard<'a, T>,
+    inner: MutexGuard<'a, T>,
 }
 
 impl<'a, T> Drop for WithSpinLockGuard<'a, T> {
