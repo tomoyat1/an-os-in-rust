@@ -111,7 +111,7 @@ impl Framebuffer<'_> {
 
     /// Converts to RawFramebuffer, for passing to the kernel.
     /// This is required since we cannot depend on GOP at runtime.
-    pub fn raw_framebuffer(&mut self) -> RawFramebuffer {
+    pub fn raw_framebuffer(mut self) -> RawFramebuffer {
         let mut raw_fb = self.gop.frame_buffer();
         let base = raw_fb.as_mut_ptr();
         let size = raw_fb.size();

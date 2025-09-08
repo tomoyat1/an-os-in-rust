@@ -73,21 +73,23 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     writeln!(fb, "Booting kernel...");
     let raw_fb = fb.raw_framebuffer();
 
-    let len = system_table.boot_services().memory_map_size().map_size;
-    let len = len * 2;
-    let mut mmap = Vec::<u8>::with_capacity(len);
-    unsafe { mmap.set_len(len) }
-
-    drop(fb);
+    let len = {
+        let mmap = system_table
+            .boot_services()
+            .memory_map(MemoryType::LOADER_DATA)
+            .unwrap();
+        mmap.entries().len() + 2 // A couple of extra entries.
+    };
 
     // Allocate new memory map before exit_boot_services(), since memory allocation will not be
     // available after this point.
-    let mut virt_mmap =
-        Vec::<MemoryDescriptor>::with_capacity(len / size_of::<MemoryDescriptor>() + 1);
-    let (system_table, mmap_iter) = system_table.exit_boot_services(MemoryType::LOADER_DATA);
+    let mut virt_mmap = Vec::<MemoryDescriptor>::with_capacity(len);
+    let (system_table, mut mmap_iter) =
+        unsafe { system_table.exit_boot_services(MemoryType::LOADER_DATA) };
 
     // Pass virtual memory mappings to UEFI for relocation of runtime services.
     let mut head: u64 = 0xffffffff80000000;
+    mmap_iter.sort();
     for entry in mmap_iter.entries() {
         let mut ve = MemoryDescriptor::default();
         ve.ty = entry.ty;
@@ -112,7 +114,7 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     let entry_point = match load_elf(&file) {
         Ok(ep) => ep,
         Err(e) => {
-            return uefi::Status::ABORTED;
+            return Status::ABORTED;
         }
     };
 

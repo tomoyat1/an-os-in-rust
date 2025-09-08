@@ -5,4 +5,4 @@ authors = ["Tomoya Tabuchi <t@tomoyat1.com>"]
 edition = "2018"
 
 [dependencies]
-uefi = "=0.28.0"
+uefi = "=0.29.0"
