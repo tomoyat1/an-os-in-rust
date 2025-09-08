@@ -1,24 +1,19 @@
 #![no_std]
 #![no_main]
-#![feature(abi_efiapi)]
 extern crate alloc;
 extern crate bootlib;
 extern crate rlibc;
 extern crate uefi;
-extern crate uefi_services;
 
 use crate::framebuffer::Framebuffer;
 use alloc::vec::*;
-use core::arch::asm;
 use core::ffi::c_void;
 use core::fmt::Write;
 use core::ptr;
 
-use log::info;
 use uefi::prelude::*;
 use uefi::proto::loaded_image::LoadedImage;
-use uefi::table::boot;
-use uefi::table::boot::{EventType, MemoryDescriptor, SearchType, TimerTrigger, Tpl};
+use uefi::table::boot::{MemoryDescriptor, MemoryType};
 use uefi::table::Runtime;
 
 pub mod framebuffer;
@@ -27,7 +22,6 @@ use crate::loader::elf::load_elf;
 use crate::loader::load_file;
 use bootlib::types::BootData;
 use core::mem;
-use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use uefi::table::cfg::ACPI2_GUID;
 
 static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
@@ -35,24 +29,25 @@ static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
 #[entry]
 fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     // Initialize logging.
-    uefi_services::init(&mut system_table)?;
+    uefi::helpers::init(&mut system_table).expect("failed to initialize uefi-rs library.");
     let addr = (&system_table as *const SystemTable<Boot>) as *const ();
     unsafe {
         SYSTEM_TABLE = addr;
     }
 
     // Initialize framebuffer
-    let fb = &mut Framebuffer::new(&system_table);
+    let mut fb = Framebuffer::new(&system_table);
     fb.init().expect("failed to initialize framebuffer");
     system_table.boot_services().stall(1000000);
+    let handle = system_table.boot_services().image_handle();
     let loaded_image = system_table
         .boot_services()
-        .handle_protocol::<LoadedImage>(handle)
+        .open_protocol_exclusive::<LoadedImage>(handle)
         .expect("error when loading loaded image protocol");
-    let loaded_image = unsafe { &*loaded_image.get() };
     let (base, size) = loaded_image.info();
     writeln!(fb, "Bootloader was loaded at {:p}", base);
     writeln!(fb, "Loading kernel...");
+    drop(loaded_image);
 
     // ACPI RSDP
     let mut acpi_rsdp: *const c_void = 0x0 as *const c_void;
@@ -83,17 +78,17 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     let mut mmap = Vec::<u8>::with_capacity(len);
     unsafe { mmap.set_len(len) }
 
+    drop(fb);
+
     // Allocate new memory map before exit_boot_services(), since memory allocation will not be
     // available after this point.
     let mut virt_mmap =
-        Vec::<MemoryDescriptor>::with_capacity(len / mem::size_of::<MemoryDescriptor>() + 1);
-    let (system_table, mmap_iter) = system_table
-        .exit_boot_services(handle, mmap.as_mut_slice())
-        .expect("failed to exit boot services");
+        Vec::<MemoryDescriptor>::with_capacity(len / size_of::<MemoryDescriptor>() + 1);
+    let (system_table, mmap_iter) = system_table.exit_boot_services(MemoryType::LOADER_DATA);
 
     // Pass virtual memory mappings to UEFI for relocation of runtime services.
     let mut head: u64 = 0xffffffff80000000;
-    for entry in mmap_iter {
+    for entry in mmap_iter.entries() {
         let mut ve = MemoryDescriptor::default();
         ve.ty = entry.ty;
         ve.phys_start = entry.phys_start;
@@ -126,7 +121,7 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     let boot_data = unsafe {
         ptr::write(
             boot_data,
-            bootlib::types::BootData {
+            BootData {
                 memory_map_buf: virt_mmap.as_mut_ptr(),
                 memory_map_len: virt_mmap.len(),
                 framebuffer: raw_fb,

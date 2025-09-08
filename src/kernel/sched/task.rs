@@ -193,19 +193,22 @@ pub(crate) fn new_task() -> usize {
         (*ptr).stack = [0; KERNEL_STACK_SIZE - size_of::<Registers>()];
 
         // I hope there's a cleaner way to do this...
-        let entry_addr = mem::transmute::<&u8, *mut usize>(
-            &(*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 8],
-        );
-        ptr::write(entry_addr, _task_entry as usize);
+        // let entry_addr = mem::transmute::<&u8, *mut usize>(
+        //     &(*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 8],
+        // );
+        // let entry_addr = &(*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 8] as *const u8
+        //     as *mut usize;
+        (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 8
+            ..KERNEL_STACK_SIZE - size_of::<Registers>()]
+            .copy_from_slice(&(_task_entry as usize).to_le_bytes());
         Box::from_raw(ptr)
     };
     let id = task_list.new_task(stack);
     let mut task = &mut task_list.tasks[id];
     unsafe {
-        let task_id = mem::transmute(
-            &task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 16],
-        );
-        ptr::write(task_id, id)
+        let task_id = task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 16
+            ..KERNEL_STACK_SIZE - size_of::<Registers>() - 8]
+            .copy_from_slice(&id.to_le_bytes());
     }
     task.kernel_stack.regs.stack_top = &(task.kernel_stack.stack
         [KERNEL_STACK_SIZE - size_of::<Registers>() - 8 - size_of::<usize>() * 6])

@@ -42,7 +42,7 @@ impl PCI {
         let mut v = Vec::<PCIDevice>::new();
 
         // Give ownership of matched devices to the caller.
-        for d in self.devices.drain_filter(p) {
+        for d in self.devices.extract_if(p) {
             v.push(d)
         }
         v
@@ -114,7 +114,7 @@ impl PCIDevice {
         let header_type: u8 = ((unsafe { self.inl(0xC, function) } & 0x00FF0000) >> 16) as u8;
         match header_type {
             0x0 => unsafe { self.inl(0x10, function) },
-            _ => 0
+            _ => 0,
         }
     }
 

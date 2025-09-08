@@ -13,10 +13,11 @@ mod fonts;
 use crate::framebuffer::fonts::{FONT_HEIGHT, FONT_WIDTH};
 use array_macro::__core::ptr::slice_from_raw_parts_mut;
 use bootlib::types::RawFramebuffer;
+use uefi::table::boot::ScopedProtocol;
 
 // TODO: make this generic in the sense that it can either use gop or the raw framebuffer behind it.
-pub struct Framebuffer<'gop> {
-    gop: &'gop mut GraphicsOutput<'gop>,
+pub struct Framebuffer<'a> {
+    gop: ScopedProtocol<'a, GraphicsOutput>,
 
     pixel_width: usize,
     pixel_height: usize,
@@ -30,14 +31,16 @@ pub struct Framebuffer<'gop> {
     font: fonts::Terminus16x18Font,
 }
 
-impl<'gop> Framebuffer<'gop> {
+impl Framebuffer<'_> {
     pub fn new(system_table: &SystemTable<Boot>) -> Framebuffer {
         let bs = system_table.boot_services();
+        let handle = bs
+            .get_handle_for_protocol::<GraphicsOutput>()
+            .expect("Graphics Output Protocol support is required!");
         let gop = bs
-            .locate_protocol::<GraphicsOutput>()
+            .open_protocol_exclusive::<GraphicsOutput>(handle)
             .expect("Graphics Output Protocol support is required!");
         // let gop = gop.expect("warnings occurred when opening GOP");
-        let gop = unsafe { &mut *gop.get() };
         let (width, height) = gop.current_mode_info().resolution();
         let (nc, nr) = (width / FONT_WIDTH, height / FONT_HEIGHT);
         let fb = Framebuffer {
@@ -50,7 +53,7 @@ impl<'gop> Framebuffer<'gop> {
             cursor_y: 0,
             font: fonts::parse_bdf(),
         };
-        return fb;
+        fb
     }
 
     pub fn init(&mut self) -> Result<(), ()> {

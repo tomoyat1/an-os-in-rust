@@ -9,15 +9,24 @@ use uefi::CStr16;
 
 pub mod elf;
 
-pub fn load_file(system_table: &SystemTable<Boot>) -> core::result::Result<Vec<u8>, String> {
+pub fn load_file(system_table: &SystemTable<Boot>) -> Result<Vec<u8>, String> {
     let bs = system_table.boot_services();
-    let fs = bs.locate_protocol::<SimpleFileSystem>().map_err(|e| {
-        String::from(format!(
-            "Simple File System Protocol support is required: {:?}",
-            e.status()
-        ))
-    })?;
-    let fs = unsafe { &mut *fs.get() };
+    let handle = bs
+        .get_handle_for_protocol::<SimpleFileSystem>()
+        .map_err(|e| {
+            String::from(format!(
+                "Simple File System Protocol support is required: {:?}",
+                e.status()
+            ))
+        })?;
+    let mut fs = bs
+        .open_protocol_exclusive::<SimpleFileSystem>(handle)
+        .map_err(|e| {
+            String::from(format!(
+                "Simple File System Protocol support is required: {:?}",
+                e.status()
+            ))
+        })?;
     let mut kernel_obj = [0; 8];
     let kernel_obj = CStr16::from_str_with_buf("aosir", &mut kernel_obj);
     let dir = &mut fs

@@ -10,8 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 log = { version = "0.4", default-features = false }
-uefi = "0.15.2"
-uefi-services = "0.12.1"
-array-macro = "1.0.5"
+uefi = { version = "=0.28.0", features = ["global_allocator", "panic_handler"] }
+array-macro = "2.1.8"
+proc-macro2 = "=1.0.61"
 rlibc = "1"
 bootlib = { path = "../bootlib" }

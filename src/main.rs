@@ -6,14 +6,14 @@
 #![feature(panic_info_message)]
 #![allow(unused)]
 #![allow(unused_unsafe)]
-#![feature(drain_filter)]
+#![feature(extract_if)]
 #![feature(new_uninit)]
 
 extern crate alloc;
 extern crate bootlib;
 extern crate rlibc;
 
-use core::fmt::Write;
+use core::fmt::{Debug, Write};
 use core::panic::PanicInfo;
 
 mod arch;
@@ -108,7 +108,7 @@ pub unsafe extern "C" fn another_task() {
 fn panic(info: &PanicInfo) -> ! {
     fn do_panic(info: &PanicInfo) -> Option<()> {
         serial::init();
-        let args = info.message()?;
+        let args = info.message();
         let location = info.location()?;
         writeln!(
             serial::Handle,
@@ -117,7 +117,7 @@ fn panic(info: &PanicInfo) -> ! {
             location.line(),
             location.column(),
         );
-        core::fmt::write(&mut serial::Handle, *args);
+        write!(&mut serial::Handle, "{}", info.message());
         Some(())
     };
     let r = do_panic(info);
