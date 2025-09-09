@@ -83,7 +83,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Placeholder code for kernel idle task.
     // TODO: this function starts the scheduler?
     loop {
-        // clock.sleep(1000);
+        clock.sleep(1000);
         let current = task::current_task();
         writeln!(serial::Handle, "Yo! from task {:}", current);
         let scheduler = sched::handle();

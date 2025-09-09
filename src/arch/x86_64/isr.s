@@ -199,8 +199,8 @@ device_isr_common:
     cld
     mov 88(%rsp), %rdi
     call device_handler
-    addq $8, %rsp /* pop vector */
     popa
+    addq $8, %rsp /* pop vector */
     sti
     iretq
 
