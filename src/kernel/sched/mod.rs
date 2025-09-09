@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use core::mem;
 use core::ops::Deref;
 
-pub(crate) mod task;
+mod task;
 
 struct Scheduler {}
 
@@ -23,6 +23,18 @@ impl<'a> SchedulerHandle<'a> {
 
         from.switch_to(to, self.task_list)
     }
+
+    pub(crate) fn new_task(&mut self) -> usize {
+        self.task_list.new_task()
+    }
+
+    pub(crate) fn current_task(&self) -> usize {
+        let t = self
+            .task_list
+            .current_task()
+            .expect("No tasks found. Maybe this is called before boot task initialization?");
+        t.task_id
+    }
 }
 
 pub(crate) fn handle<'a>() -> SchedulerHandle<'a> {
@@ -32,4 +44,9 @@ pub(crate) fn handle<'a>() -> SchedulerHandle<'a> {
         // scheduler,
         task_list,
     }
+}
+
+pub(crate) fn init() {
+    let mut task_list = unsafe { task::TASK_LIST.lock() };
+    task_list.init_idle_task()
 }

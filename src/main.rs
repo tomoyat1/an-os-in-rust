@@ -35,7 +35,6 @@ mod kernel;
 use crate::kernel::clock;
 use crate::kernel::clock::Clock;
 use crate::kernel::sched;
-use crate::kernel::sched::task;
 
 mod locking;
 
@@ -62,8 +61,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Wait for 1000ms
     clock.sleep(1000);
 
-    task::init_idle_task();
-    task::debug_task(0);
+    sched::init();
 
     serial::tmp_write_com1(b"Done\n");
 
@@ -77,16 +75,18 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     }
 
     // Create another task to demonstrate switching.
-    task::new_task();
-    task::debug_task(1);
+    {
+        let mut scheduler = sched::handle();
+        scheduler.new_task();
+    }
 
     // Placeholder code for kernel idle task.
     // TODO: this function starts the scheduler?
     loop {
         clock.sleep(1000);
-        let current = task::current_task();
-        writeln!(serial::Handle, "Yo! from task {:}", current);
         let scheduler = sched::handle();
+        let current = scheduler.current_task();
+        writeln!(serial::Handle, "Yo! from task {:}", current);
         scheduler.switch()
     }
 }
@@ -96,9 +96,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 /// another_task() is a placeholder for actual code that a newly created task would run.
 pub unsafe extern "C" fn another_task() {
     loop {
-        let current = task::current_task();
-        writeln!(serial::Handle, "Yo! from task {:}", current);
         let scheduler = sched::handle();
+        let current = scheduler.current_task();
+        writeln!(serial::Handle, "Yo! from task {:}", current);
         scheduler.switch()
     }
 }
