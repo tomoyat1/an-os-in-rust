@@ -1,35 +1,55 @@
 use crate::kernel::sched::task::{Task, TaskList};
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use alloc::vec::Vec;
-use core::mem;
 use core::ops::Deref;
+use core::{mem, ptr};
 
 mod task;
 
-struct Scheduler {}
+extern "C" {
+    fn _do_switch(
+        from: *const task::KernelStack,
+        to: *const task::KernelStack,
+        scheduler: *mut WithSpinLockGuard<Scheduler>,
+    ) -> *mut WithSpinLockGuard<Scheduler>;
+}
 
-static mut SCHEDULER: WithSpinLock<Scheduler> = WithSpinLock::new(Scheduler {});
+struct Scheduler {
+    task_list: TaskList,
+}
+
+static mut SCHEDULER: WithSpinLock<Scheduler> = WithSpinLock::new(Scheduler {
+    task_list: TaskList::new(),
+});
 
 pub struct SchedulerHandle<'a> {
-    // scheduler: WithSpinLockGuard<'a, Scheduler>,
-    task_list: WithSpinLockGuard<'a, TaskList>,
+    scheduler: WithSpinLockGuard<'a, Scheduler>,
 }
 
 impl<'a> SchedulerHandle<'a> {
-    pub(crate) fn switch(self) {
-        let from = self.task_list.current_task().unwrap();
-        let to = (from.task_id + 1) % self.task_list.len();
-        let to = self.task_list.get(to).unwrap();
+    pub(crate) fn switch(mut self) {
+        let from = self.scheduler.task_list.current_task().unwrap();
+        let to = (from.task_id + 1) % self.scheduler.task_list.len();
+        let to = self.scheduler.task_list.get(to).unwrap();
 
-        from.switch_to(to, self.task_list)
+        let mut scheduler = unsafe {
+            ptr::read(_do_switch(
+                from.kernel_stack,
+                to.kernel_stack,
+                &mut self.scheduler,
+            ))
+        };
+
+        scheduler.task_list.set_current_task(to.task_id);
     }
 
     pub(crate) fn new_task(&mut self) -> usize {
-        self.task_list.new_task()
+        self.scheduler.task_list.new_task()
     }
 
     pub(crate) fn current_task(&self) -> usize {
         let t = self
+            .scheduler
             .task_list
             .current_task()
             .expect("No tasks found. Maybe this is called before boot task initialization?");
@@ -38,15 +58,11 @@ impl<'a> SchedulerHandle<'a> {
 }
 
 pub(crate) fn handle<'a>() -> SchedulerHandle<'a> {
-    // let scheduler = unsafe { SCHEDULER.lock() };
-    let task_list = unsafe { task::TASK_LIST.lock() };
-    SchedulerHandle {
-        // scheduler,
-        task_list,
-    }
+    let scheduler = unsafe { SCHEDULER.lock() };
+    SchedulerHandle { scheduler }
 }
 
 pub(crate) fn init() {
-    let mut task_list = unsafe { task::TASK_LIST.lock() };
-    task_list.init_idle_task()
+    let mut scheduler = unsafe { SCHEDULER.lock() };
+    scheduler.task_list.init_idle_task()
 }

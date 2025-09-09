@@ -21,16 +21,8 @@ extern "C" {
     #[link_name = "boot_stack_top"]
     static mut boot_stack: KernelStack;
 
-    fn _do_switch(
-        from: *const KernelStack,
-        to: *const KernelStack,
-        task_list: *mut WithSpinLockGuard<TaskList>,
-    ) -> *mut WithSpinLockGuard<TaskList>;
-
     fn _task_entry();
 }
-
-pub(crate) static mut TASK_LIST: WithSpinLock<TaskList> = WithSpinLock::new(TaskList::new());
 
 pub(crate) struct TaskList {
     next_task_id: usize,
@@ -39,7 +31,7 @@ pub(crate) struct TaskList {
 }
 
 impl TaskList {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             next_task_id: 0,
             current: None,
@@ -56,6 +48,10 @@ impl TaskList {
             }),
             None => None,
         }
+    }
+
+    pub fn set_current_task(&mut self, id: usize) {
+        self.current = Some(id);
     }
 
     pub fn get(&self, id: usize) -> Option<TaskHandle> {
@@ -151,23 +147,7 @@ pub(crate) struct Task {
 #[derive(Copy, Clone)]
 pub(crate) struct TaskHandle {
     pub task_id: usize,
-    kernel_stack: *const KernelStack,
-}
-
-impl TaskHandle {
-    pub fn switch_to(&self, to: TaskHandle, mut task_list: WithSpinLockGuard<TaskList>) {
-        // SAFETY: ???
-        unsafe {
-            let task_list = ptr::read(_do_switch(
-                self.kernel_stack,
-                to.kernel_stack,
-                &mut task_list,
-            ));
-        };
-
-        task_list.current = Some(to.task_id);
-        // TODO: Switch paging table.
-    }
+    pub kernel_stack: *const KernelStack,
 }
 
 /// Kernel context registers for saving when context switching.
