@@ -18,15 +18,19 @@ struct Scheduler {
     task_list: TaskList,
 }
 
-static mut SCHEDULER: WithSpinLock<Scheduler> = WithSpinLock::new(Scheduler {
+static SCHEDULER: WithSpinLock<Scheduler> = WithSpinLock::new(Scheduler {
     task_list: TaskList::new(),
 });
 
-pub struct SchedulerHandle<'a> {
+pub struct Handle<'a> {
     scheduler: WithSpinLockGuard<'a, Scheduler>,
 }
 
-impl<'a> SchedulerHandle<'a> {
+impl<'a> Handle<'a> {
+    pub(crate) fn new() -> Self {
+        let scheduler = unsafe { SCHEDULER.lock() };
+        Self { scheduler }
+    }
     pub(crate) fn switch(mut self) {
         let from = self.scheduler.task_list.current_task().unwrap();
         let to = (from.task_id + 1) % self.scheduler.task_list.len();
@@ -55,11 +59,6 @@ impl<'a> SchedulerHandle<'a> {
             .expect("No tasks found. Maybe this is called before boot task initialization?");
         t.task_id
     }
-}
-
-pub(crate) fn handle<'a>() -> SchedulerHandle<'a> {
-    let scheduler = unsafe { SCHEDULER.lock() };
-    SchedulerHandle { scheduler }
 }
 
 pub(crate) fn init() {

@@ -1,3 +1,4 @@
+use crate::serial::Handle;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
@@ -15,7 +16,7 @@ use crate::net::ethernet;
 use crate::drivers::serial;
 use crate::locking::spinlock::WithSpinLock;
 
-pub static mut NICS: WithSpinLock<Vec<Arc<RTL8139>>> = WithSpinLock::new(Vec::new());
+pub static NICS: WithSpinLock<Vec<Arc<RTL8139>>> = WithSpinLock::new(Vec::new());
 
 /// Vendor ID of Realtek
 const RTL8139_VENDOR_ID: u16 = 0x10ec;
@@ -60,9 +61,10 @@ const RX_BUF_SIZE_WITH_WRAP: usize = RX_BUF_SIZE + 16 + 1500;
 
 /// Initializes all RTL8139s on the PCI bus.
 pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
-    let devices = pci::Handle.get_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
+    let mut pci = pci::Handle::new();
+    let devices = pci.get_device(RTL8139_VENDOR_ID, RTL8139_DEVICE_ID);
 
-    // SAFETY: we have and exclusive lock on the static mut NICS.
+    // SAFETY: we have an exclusive lock on the static mut NICS.
     let mut nics = unsafe { NICS.lock() };
 
     for pci_dev in devices {
@@ -229,7 +231,7 @@ impl RTL8139 {
         // SAFETY: Not confirmed to be safe yet.
         let status = unsafe { self.inw(REG_ISR) };
 
-        writeln!(serial::Handle, "ISR: 0x{:x}\n", status);
+        writeln!(Handle::new(), "ISR: 0x{:x}\n", status);
 
         // Reset status register so that another frame can be sent / received.
         // SAFETY: Not confirmed to be safe yet. The same for all following port IO calls.
@@ -282,7 +284,7 @@ impl RTL8139 {
             let (frame, remaining) = remaining.split_at(frame_size as usize);
             // Process frame
             writeln!(
-                serial::Handle,
+                Handle::new(),
                 "RSR: {:x}, SIZE: {:x}, CAPR: {:x}, CBR: {:x}",
                 rsr,
                 frame_size,
@@ -297,7 +299,7 @@ impl RTL8139 {
             match ethernet::Frame::from_bytes(frame) {
                 Ok(frame) => {
                     writeln!(
-                        serial::Handle,
+                        Handle::new(),
                         "src: {}, dest: {}, EtherType: {}\n",
                         &frame.header.src_mac,
                         &frame.header.dest_mac,
@@ -305,7 +307,7 @@ impl RTL8139 {
                     );
                 }
                 Err(s) => {
-                    writeln!(serial::Handle, "{}\n", s);
+                    writeln!(Handle::new(), "{}\n", s);
                 }
             }
 

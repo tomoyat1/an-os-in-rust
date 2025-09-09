@@ -19,11 +19,11 @@ extern "C" {
     static mut device_isr_entries: [[u8; 7]; 96];
 }
 
-pub static mut IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC::new(0));
+pub static IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC::new(0));
 
-pub static mut LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC::new(0));
+pub static LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC::new(0));
 
-static mut IDT: WithSpinLock<[u128; 40]> = WithSpinLock::new([0; 40]);
+static IDT: WithSpinLock<[u128; 40]> = WithSpinLock::new([0; 40]);
 
 // TODO: lock this properly
 static mut IRQ_HANDLERS: [usize; 128] = [0; 128];

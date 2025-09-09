@@ -11,7 +11,7 @@ const MODE_CMD: u8 = 0x43;
 
 const IOAPIC_LINE: u32 = 2;
 
-static mut PIT: WithSpinLock<PIT> = WithSpinLock::new(PIT::new());
+static PIT: WithSpinLock<PIT> = WithSpinLock::new(PIT::new());
 
 pub struct PIT {
     count: u64,

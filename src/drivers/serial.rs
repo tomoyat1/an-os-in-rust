@@ -1,9 +1,9 @@
 use crate::arch::x86_64::port;
-use crate::locking::spinlock::WithSpinLock;
+use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 
 const COM1_PORT: u16 = 0x3f8;
 
-static mut COM1: WithSpinLock<Option<Com>> = WithSpinLock::new(None);
+static COM1: WithSpinLock<Com> = WithSpinLock::new(Com { port: None });
 
 pub fn init() {
     let divisor: u16 = 0x2;
@@ -16,15 +16,14 @@ pub fn init() {
 
     unsafe {
         let mut com1 = COM1.lock();
-        *com1 = Some(com);
+        *com1 = com;
     }
 }
 
 pub fn tmp_write_com1(buf: &[u8]) {
     let com1 = unsafe { COM1.lock() };
-    let com1 = com1.as_ref();
-    match com1 {
-        Some(com1) => {
+    match com1.port {
+        Some(_) => {
             com1.write_all(buf);
         }
         None => {}
@@ -35,9 +34,8 @@ pub fn read_com1() {
     let mut buf: [u8; 16] = [0; 16];
     unsafe {
         let com1 = COM1.lock();
-        let com1 = com1.as_ref();
-        match com1 {
-            Some(com1) => {
+        match com1.port {
+            Some(_) => {
                 if let Ok(len) = com1.read(&mut buf) {
                     // TODO: read byte into the driver's buffer instead of writing it out.
                     //       deciding to write the byte out should be the job of whoever gets the
@@ -52,7 +50,7 @@ pub fn read_com1() {
 }
 
 pub struct Com {
-    port: u16,
+    port: Option<u16>,
     // TODO: Add read and write buffers. Keep in mind that these will be accessed in IRQ context, so
     //       task switching while manipulating them is a big no-no.
 }
@@ -60,32 +58,36 @@ pub struct Com {
 impl Com {
     fn new(port: u16, divisor: u16) -> Self {
         // set divisor
-        let com = Self { port };
-        unsafe {
-            com.outb(1, 0);
-            com.outb(3, 0x80);
-            com.outb(0, divisor as u8);
-            com.outb(1, (divisor >> 8) as u8);
-            com.outb(3, 0x03);
+        let com = Self { port: Some(port) };
+        com.outb(1, 0);
+        com.outb(3, 0x80);
+        com.outb(0, divisor as u8);
+        com.outb(1, (divisor >> 8) as u8);
+        com.outb(3, 0x03);
 
-            // Enable FIFO, clear them, with 14-byte threshold?
-            com.outb(2, 0xc7);
+        // Enable FIFO, clear them, with 14-byte threshold?
+        com.outb(2, 0xc7);
 
-            // Enable IRQs, RTS/DTS set?
-            com.outb(1, 0b00000111);
-            com.outb(4, 0x0b);
-        }
+        // Enable IRQs, RTS/DTS set?
+        com.outb(1, 0b00000111);
+        com.outb(4, 0x0b);
 
         com
     }
 
     fn inb(&self, offset: u16) -> u8 {
-        unsafe { port::inb(self.port + offset) }
+        match self.port {
+            Some(port) => unsafe { port::inb(port + offset) },
+            None => 0,
+        }
     }
 
     fn outb(&self, offset: u16, data: u8) {
-        unsafe {
-            port::outb(self.port + offset, data);
+        match self.port {
+            Some(port) => unsafe {
+                port::outb(port + offset, data);
+            },
+            None => { /* No port to write to */ }
         }
     }
 
@@ -157,7 +159,7 @@ impl Com {
         Ok(len)
     }
 
-    /// Writes all of the bytes in `buf` to serial port `self`. This method will block and wait if
+    /// Writes all the bytes in `buf` to serial port `self`. This method will block and wait if
     /// necessary.
     pub fn write_all(&self, buf: &[u8]) -> Result<(), ()> {
         let mut slice = buf;
@@ -174,12 +176,10 @@ impl Com {
     }
 }
 
-impl core::fmt::Write for WithSpinLock<Option<Com>> {
+impl core::fmt::Write for Com {
     fn write_str(&mut self, s: &str) -> Result<(), core::fmt::Error> {
-        let com = self.lock();
-        let com = com.as_ref();
-        if let Some(com) = com {
-            match com.write_all(s.as_bytes()) {
+        if let Some(port) = self.port {
+            match self.write_all(s.as_bytes()) {
                 Ok(()) => Ok(()),
                 Err(()) => Err(core::fmt::Error),
             }
@@ -189,15 +189,24 @@ impl core::fmt::Write for WithSpinLock<Option<Com>> {
     }
 }
 
-// Handle to expose WithSpinLock<Com> to outside of this module for use with write_ln!.
-// This is just for experimentation. Final interface is to be designed
+/// Handle to expose WithSpinLock<Com> to outside of this module for use with write_ln!.
+/// This is just for experimentation. Final interface is to be designed
 // Think about abstraction for singletons (for objects that control a shared hardware resource)
 // (serial, PCI ...)
 // Like, a queue of requests to the singleton
-pub struct Handle;
+pub struct Handle<'a> {
+    com1: WithSpinLockGuard<'a, Com>,
+}
 
-impl core::fmt::Write for Handle {
+impl<'a> Handle<'a> {
+    pub fn new() -> Self {
+        let com1 = unsafe { COM1.lock() };
+        Self { com1 }
+    }
+}
+
+impl<'a> core::fmt::Write for Handle<'a> {
     fn write_str(&mut self, s: &str) -> Result<(), core::fmt::Error> {
-        unsafe { COM1.write_str(s) }
+        self.com1.write_str(s)
     }
 }

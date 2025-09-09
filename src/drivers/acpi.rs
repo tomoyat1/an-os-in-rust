@@ -190,5 +190,5 @@ fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
         }
         head += length as usize;
     }
-    return madt_info;
+    madt_info
 }

@@ -98,7 +98,7 @@ impl TaskList {
 
     pub fn init_idle_task(&mut self) {
         // We only read the address
-        let mut idle_task_stack = unsafe { &mut boot_stack as *mut KernelStack };
+        let mut idle_task_stack = unsafe { &raw mut boot_stack };
 
         // SAFETY: The idle_task_stack never goes out of scope, as long as the kernel is running.
         //         Therefore, it is safe to pretend that the memory for the stack was allocated

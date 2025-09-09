@@ -6,7 +6,7 @@
 #![allow(unused)]
 #![allow(unused_unsafe)]
 #![feature(extract_if)]
-
+#![feature(sync_unsafe_cell)]
 extern crate alloc;
 extern crate bootlib;
 extern crate rlibc;
@@ -74,7 +74,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 
     // Create another task to demonstrate switching.
     {
-        let mut scheduler = sched::handle();
+        let mut scheduler = sched::Handle::new();
         scheduler.new_task();
     }
 
@@ -82,9 +82,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // TODO: this function starts the scheduler?
     loop {
         clock.sleep(1000);
-        let scheduler = sched::handle();
+        let scheduler = sched::Handle::new();
         let current = scheduler.current_task();
-        writeln!(serial::Handle, "Yo! from task {:}", current);
+        writeln!(serial::Handle::new(), "Yo! from task {:}", current);
         scheduler.switch()
     }
 }
@@ -94,9 +94,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 /// another_task() is a placeholder for actual code that a newly created task would run.
 pub unsafe extern "C" fn another_task() {
     loop {
-        let scheduler = sched::handle();
+        let scheduler = sched::Handle::new();
         let current = scheduler.current_task();
-        writeln!(serial::Handle, "Yo! from task {:}", current);
+        writeln!(serial::Handle::new(), "Yo! from task {:}", current);
         scheduler.switch()
     }
 }
@@ -109,18 +109,18 @@ fn panic(info: &PanicInfo) -> ! {
         let args = info.message();
         let location = info.location()?;
         writeln!(
-            serial::Handle,
+            serial::Handle::new(),
             "file: {}, line: {}, col: {}",
             location.file(),
             location.line(),
             location.column(),
         );
-        write!(&mut serial::Handle, "{}", info.message());
+        write!(&mut serial::Handle::new(), "{}", info.message());
         Some(())
     };
     let r = do_panic(info);
     if r == None {
-        writeln!(serial::Handle, "Failed to get panic message");
+        writeln!(serial::Handle::new(), "Failed to get panic message");
     }
 
     // TODO: Paint screen red.

@@ -1,4 +1,5 @@
 use core::arch::asm;
+use core::ptr;
 use core::slice::from_raw_parts;
 
 use uefi::table::boot;
@@ -27,14 +28,16 @@ const MASK_29_0: usize = 0x000000003fffffff;
 /// This also maps memory required for UEFI runtime services so that memory layout matches
 /// what the bootloader set with SetVirtualAddressMap().
 pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
-    let kernel_pml4 = unsafe { &mut KERNEL_PML4 };
-    let boot_pdpt = unsafe { &mut BOOT_PDPT };
+    let kernel_pml4 = unsafe { &raw const KERNEL_PML4 };
 
     // Map first 2 GiB of physical memory to upper 2 GiB.
     // First GiB is already done, so do the latter 1 GiB.
     let pdpt_idx: usize = ((KERNEL_BASE + (1 << 30)) & MASK_38_30) >> 30;
     let pdpte = 1 << 30u64 & MASK_47_30 as u64 | 0x83;
-    boot_pdpt[pdpt_idx] = pdpte;
+    unsafe {
+        let boot_pdpt = unsafe { &raw mut BOOT_PDPT[pdpt_idx] };
+        ptr::write_volatile(boot_pdpt, pdpte);
+    }
 
     // Map UEFI runtime service memory to space below kernel.
     // memory_map contains ALL mappings, including ones unnecessary after exit_boot_services().
@@ -79,9 +82,9 @@ fn flush_tlb() {
 // TODO: decide u64 or usize or *const u8.
 pub fn phys_addr(linear_addr: *const u8) -> *const u8 {
     let pml4e = {
-        let kernel_pml4 = unsafe { &KERNEL_PML4 };
         let idx = (linear_addr as usize & MASK_47_39) >> 39;
-        kernel_pml4[idx]
+        let kernel_pml4 = unsafe { &raw const KERNEL_PML4[idx] };
+        unsafe { ptr::read_volatile(kernel_pml4) }
     } as usize;
 
     let pdpte = unsafe {

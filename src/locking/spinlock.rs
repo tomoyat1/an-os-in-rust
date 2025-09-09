@@ -1,16 +1,17 @@
 use core::arch::asm;
+use core::cell::SyncUnsafeCell;
 use core::ops::{Deref, DerefMut};
 use core::ptr::drop_in_place;
 use spin::MutexGuard;
 
 pub struct WithSpinLock<A> {
-    inner: spin::Mutex<A>,
+    inner: SyncUnsafeCell<spin::Mutex<A>>,
 }
 
 impl<A> WithSpinLock<A> {
     pub const fn new(a: A) -> Self {
         Self {
-            inner: spin::Mutex::new(a),
+            inner: SyncUnsafeCell::new(spin::Mutex::new(a)),
         }
     }
 
@@ -18,9 +19,11 @@ impl<A> WithSpinLock<A> {
         // Disable interrupts to prevent deadlocks.
         unsafe { asm!("cli") };
 
-        WithSpinLockGuard {
-            inner: self.inner.lock(),
-        }
+        // SAFETY: Access exclusivity is guaranteed through the spinlock Mutex.
+        let spin_mutex = unsafe { &mut *self.inner.get() };
+        let guard = spin_mutex.lock();
+
+        WithSpinLockGuard { inner: guard }
     }
 }
 
