@@ -3,11 +3,9 @@
 #![no_builtins]
 #![feature(linkage)]
 #![feature(alloc_error_handler)]
-#![feature(panic_info_message)]
 #![allow(unused)]
 #![allow(unused_unsafe)]
 #![feature(extract_if)]
-#![feature(new_uninit)]
 
 extern crate alloc;
 extern crate bootlib;

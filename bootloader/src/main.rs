@@ -21,7 +21,6 @@ pub mod loader;
 use crate::loader::elf::load_elf;
 use crate::loader::load_file;
 use bootlib::types::BootData;
-use core::mem;
 use uefi::table::cfg::ACPI2_GUID;
 
 static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
@@ -44,7 +43,7 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         .boot_services()
         .open_protocol_exclusive::<LoadedImage>(handle)
         .expect("error when loading loaded image protocol");
-    let (base, size) = loaded_image.info();
+    let (base, _size) = loaded_image.info();
     writeln!(fb, "Bootloader was loaded at {:p}", base);
     writeln!(fb, "Loading kernel...");
     drop(loaded_image);
@@ -65,8 +64,8 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
             file
         }
         Err(e) => {
-            writeln!(fb, "kernel load failed: {:?}", e);
-            return uefi::Status::ABORTED;
+            writeln!(fb, "kernel read failed: {:?}", e);
+            return Status::ABORTED;
         }
     };
 
@@ -96,7 +95,7 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         ve.phys_start = entry.phys_start;
         ve.page_count = entry.page_count;
         ve.att = entry.att;
-        head -= (ve.page_count * 0x1000);
+        head -= ve.page_count * 0x1000;
         ve.virt_start = head;
         virt_mmap.push(ve);
     }
@@ -113,7 +112,7 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     let system_table = &system_table as *const SystemTable<Runtime>;
     let entry_point = match load_elf(&file) {
         Ok(ep) => ep,
-        Err(e) => {
+        Err(_e) => {
             return Status::ABORTED;
         }
     };

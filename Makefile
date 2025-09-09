@@ -1,10 +1,15 @@
+.PHONY: build build-kernel build-bootloader instal
 all: build
 
 clean:
 	cargo clean
 
-build:
+build: build-kernel build-bootloader
+
+build-kernel:
 	cargo build -Z build-std=core,alloc  --target x86_64-unknown-aosir.json
+
+build-bootloader:
 	cd bootloader && cargo build -Z build-std=core,alloc,std --target x86_64-unknown-uefi
 
 install:

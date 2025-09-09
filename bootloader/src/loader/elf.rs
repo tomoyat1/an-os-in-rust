@@ -2,18 +2,14 @@ use alloc::format;
 use alloc::string::String;
 use core::mem;
 
-use crate::framebuffer::Framebuffer;
-use core::fmt::Write;
 use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use core::str::from_utf8;
 
-use log::info;
-
-const EI_NIDENT: usize = 16;
+const E_IDENT: usize = 16;
 
 #[repr(C)]
 struct ElfHeader {
-    e_ident: [u8; EI_NIDENT],
+    e_ident: [u8; E_IDENT],
     e_type: u16,
     e_machine: u16,
     e_version: u32,
@@ -43,7 +39,7 @@ struct ProgramHeader {
 
 pub fn load_elf(
     elf_file: &[u8],
-) -> core::result::Result<unsafe extern "C" fn(&bootlib::types::BootData), String> {
+) -> Result<unsafe extern "C" fn(&bootlib::types::BootData), String> {
     let elf_header: *const u8 = &elf_file[0];
     let elf_header = unsafe { &*(elf_header as *const ElfHeader) };
     let magic = from_utf8(&elf_header.e_ident[1..4])
@@ -55,13 +51,10 @@ pub fn load_elf(
         let head = &*(program_header as *const ProgramHeader);
         &*slice_from_raw_parts::<ProgramHeader>(head, elf_header.e_phnum as usize)
     };
-    assert_eq!(
-        mem::size_of::<ProgramHeader>(),
-        elf_header.e_phentsize as usize
-    );
+    assert_eq!(size_of::<ProgramHeader>(), elf_header.e_phentsize as usize);
 
     // Load segments
-    for (i, ph) in program_headers.iter().enumerate() {
+    for ph in program_headers.iter() {
         if ph.p_paddr == 0 {
             continue;
         }

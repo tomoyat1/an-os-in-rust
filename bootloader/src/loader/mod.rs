@@ -64,7 +64,7 @@ pub fn load_file(system_table: &SystemTable<Boot>) -> Result<Vec<u8>, String> {
                 unsafe {
                     buf.set_len(info.file_size() as usize);
                 }
-                let read_size = f.read(&mut buf).map_err(|e| {
+                f.read(&mut buf).map_err(|e| {
                     String::from(format!("failed to read kernel: {:?}", e.status()))
                 })?;
                 Ok(buf)

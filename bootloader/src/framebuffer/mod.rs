@@ -5,13 +5,10 @@ use alloc::vec::Vec;
 use uefi::prelude::*;
 use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
 
-use log::info;
-
 const SQUARE_SIZE: usize = 50;
 
 mod fonts;
 use crate::framebuffer::fonts::{FONT_HEIGHT, FONT_WIDTH};
-use array_macro::__core::ptr::slice_from_raw_parts_mut;
 use bootlib::types::RawFramebuffer;
 use uefi::table::boot::ScopedProtocol;
 

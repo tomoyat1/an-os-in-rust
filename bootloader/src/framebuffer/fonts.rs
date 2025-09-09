@@ -1,5 +1,4 @@
 use alloc::vec::Vec;
-use core::str::{Lines, SplitWhitespace};
 use log::info;
 
 static TERMINUS_U18N: &'static str = include_str!("./ter-u18n.bdf");
@@ -137,7 +136,7 @@ pub fn parse_bdf() -> Terminus16x18Font {
                         let line_len = v.len();
                         let mut arr = Vec::<u8>::with_capacity(line_len);
                         let chars = v.chars();
-                        for (i, c) in chars.enumerate() {
+                        for c in chars {
                             let d = c.to_digit(16).unwrap() as u8;
                             arr.push(d);
 
@@ -160,5 +159,5 @@ pub fn parse_bdf() -> Terminus16x18Font {
             }
         }
     }
-    return font;
+    font
 }

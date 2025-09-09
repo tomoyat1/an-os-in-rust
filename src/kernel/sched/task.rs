@@ -12,7 +12,6 @@ use core::cell::RefCell;
 use core::fmt::Write;
 use core::iter::Take;
 use core::mem::size_of;
-use core::ptr::drop_in_place;
 use core::{mem, ptr};
 use spin::MutexGuard;
 
