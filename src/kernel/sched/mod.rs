@@ -35,6 +35,7 @@ impl<'a> Handle<'a> {
         let from = self.scheduler.task_list.current_task().unwrap();
         let to = (from.task_id + 1) % self.scheduler.task_list.len();
         let to = self.scheduler.task_list.get(to).unwrap();
+        self.scheduler.task_list.set_current_task(to.task_id);
 
         let mut scheduler = unsafe {
             ptr::read(_do_switch(
@@ -43,8 +44,6 @@ impl<'a> Handle<'a> {
                 &mut self.scheduler,
             ))
         };
-
-        scheduler.task_list.set_current_task(to.task_id);
     }
 
     pub(crate) fn new_task(&mut self) -> usize {
