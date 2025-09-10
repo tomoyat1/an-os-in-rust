@@ -1,6 +1,8 @@
 use crate::kernel::sched::task::{Task, TaskList};
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use alloc::vec::Vec;
+use core::ffi::c_void;
+use core::mem::ManuallyDrop;
 use core::ops::Deref;
 use core::{mem, ptr};
 
@@ -10,8 +12,8 @@ extern "C" {
     fn _do_switch(
         from: *const task::KernelStack,
         to: *const task::KernelStack,
-        scheduler: *mut WithSpinLockGuard<Scheduler>,
-    ) -> *mut WithSpinLockGuard<Scheduler>;
+        scheduler: *mut c_void,
+    ) -> *mut c_void;
 }
 
 struct Scheduler {
@@ -37,12 +39,15 @@ impl<'a> Handle<'a> {
         let to = self.scheduler.task_list.get(to).unwrap();
         self.scheduler.task_list.set_current_task(to.task_id);
 
-        let mut scheduler = unsafe {
-            ptr::read(_do_switch(
+        let mut scheduler = ManuallyDrop::new(self.scheduler);
+        unsafe {
+            let mut scheduler = ptr::read(_do_switch(
                 from.kernel_stack,
                 to.kernel_stack,
-                &mut self.scheduler,
-            ))
+                &raw mut scheduler as *mut c_void,
+            )
+                as *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>);
+            ManuallyDrop::drop(&mut scheduler);
         };
     }
 

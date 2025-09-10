@@ -1,5 +1,6 @@
 use crate::another_task;
 use crate::drivers::serial;
+use crate::kernel::sched::Scheduler;
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use alloc::alloc::alloc;
 use alloc::borrow::ToOwned;
@@ -11,7 +12,7 @@ use core::arch::asm;
 use core::cell::RefCell;
 use core::fmt::Write;
 use core::iter::Take;
-use core::mem::size_of;
+use core::mem::{size_of, ManuallyDrop};
 use core::{mem, ptr};
 use spin::MutexGuard;
 
@@ -172,12 +173,11 @@ pub(crate) struct KernelStack {
 
 #[no_mangle]
 #[linkage = "external"]
-unsafe fn task_entry(task_id: usize, task_list: *mut WithSpinLockGuard<TaskList>) {
-    // Iff we are running this function, then we are running as a newly initialized task.
-    // Set the current task as such.
+unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>) {
     {
-        let mut task_list = unsafe { ptr::read(task_list) };
-        task_list.current = Some(task_id);
+        let mut scheduler = unsafe { ptr::read(scheduler) };
+        // Drop the scheduler RAII guard to release the lock.
+        ManuallyDrop::drop(&mut scheduler);
     }
 
     // Actual code that the task starts running
