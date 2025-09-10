@@ -184,7 +184,7 @@ unsafe extern "C" fn device_handler(vector: u64) {
     let handler = unsafe { IRQ_HANDLERS[vector as usize] } as *const ();
 
     // SAFETY: All code that has been written to IRQ_HANDLERS should have made sure that what
-    //         valid they write are function address.
+    //         they write are valid function address.
     let handler = unsafe {
         // Should `handler` be null checked? Or is it alright to just page fault.
         core::mem::transmute::<*const (), fn(u64)>(handler)

@@ -13,29 +13,31 @@ const IOAPIC_LINE: u32 = 2;
 
 static PIT: WithSpinLock<PIT> = WithSpinLock::new(PIT::new());
 
+pub const TICK_INTERVAL: u64 = 1_000_000; // In nanoseconds
+
 pub struct PIT {
-    count: u64,
-    mode: clock::Mode,
+    tick: Option<fn(u64)>,
 }
 
 impl PIT {
     pub const fn new() -> Self {
-        Self {
-            count: 0,
-            mode: clock::Mode::UNINITIALIZED,
-        }
+        Self { tick: None }
     }
 }
 
-pub unsafe fn start() -> impl Clock {
+pub unsafe fn start() {
     let mut pit = unsafe { PIT.lock() };
     pit.start_rate();
     interrupt::mask_line(false, IOAPIC_LINE);
-    &PIT
+}
+
+pub fn register_tick(tick: fn(u64)) {
+    let mut pid = PIT.lock();
+    pid.tick = Some(tick);
 }
 
 // TODO: make this unsafe trait.
-impl Clock for PIT {
+impl PIT {
     fn start_rate(&mut self) {
         // Use 1ms period for now.
         let count: u16 = 1193; // Close enough to 1ms period
@@ -45,37 +47,11 @@ impl Clock for PIT {
             port::outb(CHAN0_DATA as u16, count as u8);
             port::outb(CHAN0_DATA as u16, (count >> 8) as u8);
         }
-        self.mode = clock::Mode::RATE;
-    }
-
-    fn tick(&mut self) {
-        self.count += 1;
-    }
-
-    fn get_count(&self) -> u64 {
-        self.count
     }
 }
-
-impl Clock for &WithSpinLock<PIT> {
-    fn start_rate(&mut self) {
-        let mut pit = self.lock();
-        pit.start_rate();
-    }
-
-    fn tick(&mut self) {
-        let mut pit = self.lock();
-        pit.tick();
-    }
-
-    fn get_count(&self) -> u64 {
-        let pit = self.lock();
-        pit.get_count()
-    }
-}
-
 pub fn pit_tick() {
-    let mut pit = unsafe { PIT.lock() };
-    // increment clock count
-    pit.tick();
+    let pit = PIT.lock();
+    if let Some(tick) = pit.tick {
+        tick(1_000_000_000 / TICK_INTERVAL);
+    }
 }

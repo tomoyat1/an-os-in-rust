@@ -31,7 +31,7 @@ mod mm;
 
 mod kernel;
 use crate::kernel::clock;
-use crate::kernel::clock::Clock;
+use crate::kernel::clock::{sleep, Clock};
 use crate::kernel::sched;
 
 mod locking;
@@ -49,7 +49,10 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     init_mm(boot_data.memory_map); // TODO: error handling
     let gdt = pm::init();
     let lapic_id = interrupt::init(&madt);
-    let mut clock = pit::start();
+    pit::start();
+
+    pit::register_tick(clock::tick_fn());
+
     serial::init();
 
     // let stack_top: *mut u8 = 0xffffffffcfffffff as *mut u8;
@@ -57,7 +60,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // *stack_top = 0xde;
 
     // Wait for 1000ms
-    clock.sleep(1000);
+    sleep(1000);
 
     sched::init();
 
@@ -81,7 +84,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Placeholder code for kernel idle task.
     // TODO: this function starts the scheduler?
     loop {
-        clock.sleep(1000);
+        sleep(1000);
         let scheduler = sched::Handle::new();
         let current = scheduler.current_task();
         writeln!(serial::Handle::new(), "Yo! from task {:}", current);
@@ -94,9 +97,10 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 /// another_task() is a placeholder for actual code that a newly created task would run.
 pub unsafe extern "C" fn another_task() {
     loop {
+        sleep(1000);
         let scheduler = sched::Handle::new();
         let current = scheduler.current_task();
-        writeln!(serial::Handle::new(), "Yo! from task {:}", current);
+        writeln!(serial::Handle::new(), "Another yo! from task {:}", current);
         scheduler.switch()
     }
 }
