@@ -1,20 +1,15 @@
-use crate::drivers::serial;
 use crate::kernel::sched::Scheduler;
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::some_task;
 use alloc::alloc::alloc;
-use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
-use alloc::sync::{Arc, Weak};
+use alloc::collections::{BTreeMap, BinaryHeap};
 use core::alloc::Layout;
 use core::arch::asm;
-use core::cell::RefCell;
+use core::cmp::Ordering;
 use core::fmt::{Formatter, Write};
-use core::iter::Take;
 use core::mem::{size_of, ManuallyDrop};
 use core::{fmt, mem, ptr};
-use spin::MutexGuard;
 
 const KERNEL_STACK_SIZE: usize = 0x2000;
 
@@ -29,6 +24,7 @@ pub(crate) struct TaskList {
     next_task_id: usize,
     current: Option<usize>,
     tasks: BTreeMap<usize, Box<Task>>,
+    schedulable: BinaryHeap<TaskInfo>,
 }
 
 impl TaskList {
@@ -37,6 +33,7 @@ impl TaskList {
             next_task_id: 0,
             current: None,
             tasks: BTreeMap::new(),
+            schedulable: BinaryHeap::new(),
         }
     }
 
@@ -58,6 +55,22 @@ impl TaskList {
     pub fn get_ptr(&self, id: TaskHandle) -> *const Task {
         let task = self.tasks.get(&id.0).expect("Task must exist for handle!");
         task.as_ref()
+    }
+
+    pub fn increment_score(&mut self, id: TaskHandle) {
+        let task = self
+            .tasks
+            .get_mut(&id.0)
+            .expect("Task must exist for handle!");
+        task.info.score += 1;
+        if task.info.flags.is_runnable() {
+            self.schedulable.push(task.info);
+        }
+    }
+
+    pub fn next(&mut self) -> Option<TaskHandle> {
+        let next = self.schedulable.pop()?;
+        Some(TaskHandle(next.task_id))
     }
 
     pub fn new_task(&mut self) -> TaskHandle {
@@ -94,6 +107,7 @@ impl TaskList {
         kernel_stack.info.registers.stack_top = &(kernel_stack.stack
             [(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 8 - size_of::<usize>() * 6])
             as *const u8 as usize;
+        self.schedulable.push(kernel_stack.info);
         TaskHandle(id)
     }
 
@@ -136,11 +150,31 @@ impl TaskList {
     }
 }
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub(crate) struct TaskInfo {
     pub(crate) task_id: usize,
     registers: Registers,
     pub(crate) flags: TaskFlags,
-    kernel_stack: Box<Task>,
+    score: u64,
+}
+
+impl PartialEq for TaskInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.score.eq(&other.score)
+    }
+}
+impl PartialOrd for TaskInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.score.partial_cmp(&other.score).map(|o| o.reverse())
+    }
+}
+
+impl Eq for TaskInfo {}
+
+impl Ord for TaskInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.score.cmp(&other.score).reverse()
+    }
 }
 
 #[derive(Copy, Clone)]

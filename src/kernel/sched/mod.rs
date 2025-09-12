@@ -34,12 +34,14 @@ impl<'a> Handle<'a> {
         Self { scheduler }
     }
     pub(crate) fn switch(mut self) {
-        let switch_from = self.scheduler.task_list.current_task().unwrap();
-        // TODO: Fix panic when `to` doesn't exist, which happens when the task
-        //       `(from.task_id + 1) % self.scheduler.task_list.len()` has been removed.
-        //        Probably maintain a list of runnable tasks, and rework the runnable flag.
-        let switch_to = (usize::from(switch_from) + 1) % self.scheduler.task_list.len();
-        let switch_to = self.scheduler.task_list.get(switch_to).unwrap();
+        // For now, assume that the list of schedulable tasks is not empty.
+        let switch_to = self
+            .scheduler
+            .task_list
+            .next()
+            .expect("Schedulable tasks exhausted.");
+        let mut switch_from = self.scheduler.task_list.current_task().unwrap();
+        self.scheduler.task_list.increment_score(switch_from);
         self.scheduler
             .task_list
             .set_current_task(usize::from(switch_to));
@@ -47,7 +49,7 @@ impl<'a> Handle<'a> {
         let switch_to = self.scheduler.task_list.get_ptr(switch_to);
 
         let mut scheduler = ManuallyDrop::new(self.scheduler);
-        let from = unsafe {
+        unsafe {
             let mut scheduler =
                 ptr::read(
                     _do_switch(switch_from, switch_to, &raw mut scheduler as *mut c_void)

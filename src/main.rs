@@ -80,7 +80,11 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         serial::tmp_write_com1(b"NO NIC\n")
     }
 
-    // Create two tasks to demonstrate switching.
+    // Create several tasks to demonstrate switching.
+    {
+        let mut scheduler = sched::Handle::new();
+        scheduler.new_task();
+    }
     {
         let mut scheduler = sched::Handle::new();
         scheduler.new_task();
