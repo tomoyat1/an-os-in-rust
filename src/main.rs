@@ -80,32 +80,37 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         serial::tmp_write_com1(b"NO NIC\n")
     }
 
-    // Create another task to demonstrate switching.
+    // Create two tasks to demonstrate switching.
+    {
+        let mut scheduler = sched::Handle::new();
+        scheduler.new_task();
+    }
     {
         let mut scheduler = sched::Handle::new();
         scheduler.new_task();
     }
 
-    // Placeholder code for kernel idle task.
-    // TODO: this function starts the scheduler?
+    // Start kernel main loop, where we handle queued data from interrupts.
     loop {
         sleep(1000);
         let scheduler = sched::Handle::new();
         let current = scheduler.current_task();
-        writeln!(serial::Handle::new(), "Yo! from task {:}", current);
+        writeln!(serial::Handle::new(), "Yo! from kernel main loop",);
+
+        // Were done handling all unprocessed inputs/outputs. Switch to another task.
         scheduler.switch()
     }
 }
 
 #[no_mangle]
 #[linkage = "external"]
-/// another_task() is a placeholder for actual code that a newly created task would run.
-pub unsafe extern "C" fn another_task() {
+/// This is a placeholder for actual code that a newly created task would run.
+pub unsafe extern "C" fn some_task() {
     loop {
         sleep(1000);
         let scheduler = sched::Handle::new();
         let current = scheduler.current_task();
-        writeln!(serial::Handle::new(), "Another yo! from task {:}", current);
+        writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
         scheduler.switch()
     }
 }

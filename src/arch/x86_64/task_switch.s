@@ -8,8 +8,8 @@ _do_switch:
     pushq %r14
     pushq %r15
 
-    movq %rsp, (%rdi)
-    movq (%rsi), %rsp
+    movq %rsp, 8(%rdi)
+    movq 8(%rsi), %rsp
 
     popq %r15
     popq %r14

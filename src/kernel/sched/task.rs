@@ -1,26 +1,26 @@
-use crate::another_task;
 use crate::drivers::serial;
 use crate::kernel::sched::Scheduler;
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
+use crate::some_task;
 use alloc::alloc::alloc;
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
-use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::arch::asm;
 use core::cell::RefCell;
-use core::fmt::Write;
+use core::fmt::{Formatter, Write};
 use core::iter::Take;
 use core::mem::{size_of, ManuallyDrop};
-use core::{mem, ptr};
+use core::{fmt, mem, ptr};
 use spin::MutexGuard;
 
 const KERNEL_STACK_SIZE: usize = 0x2000;
 
 extern "C" {
     #[link_name = "boot_stack_top"]
-    static mut boot_stack: KernelStack;
+    static mut boot_stack: Task;
 
     fn _task_entry();
 }
@@ -28,7 +28,7 @@ extern "C" {
 pub(crate) struct TaskList {
     next_task_id: usize,
     current: Option<usize>,
-    tasks: Vec<Task>,
+    tasks: BTreeMap<usize, Box<Task>>,
 }
 
 impl TaskList {
@@ -36,19 +36,14 @@ impl TaskList {
         Self {
             next_task_id: 0,
             current: None,
-            tasks: Vec::new(),
+            tasks: BTreeMap::new(),
         }
     }
 
     pub fn current_task(&self) -> Option<TaskHandle> {
         let id = self.current?;
-        match self.current {
-            Some(i) => Some(TaskHandle {
-                task_id: id,
-                kernel_stack: self.tasks[i].kernel_stack.as_ref(),
-            }),
-            None => None,
-        }
+        let _ = self.tasks.get(&id)?;
+        Some(TaskHandle(id))
     }
 
     pub fn set_current_task(&mut self, id: usize) {
@@ -56,45 +51,50 @@ impl TaskList {
     }
 
     pub fn get(&self, id: usize) -> Option<TaskHandle> {
-        let task = self.tasks.get(id)?;
-        Some(TaskHandle {
-            task_id: id,
-            kernel_stack: task.kernel_stack.as_ref(),
-        })
+        let _ = self.tasks.get(&id)?;
+        Some(TaskHandle(id))
     }
 
-    pub fn new_task(&mut self) -> usize {
+    pub fn get_ptr(&self, id: TaskHandle) -> *const Task {
+        let task = self.tasks.get(&id.0).expect("Task must exist for handle!");
+        task.as_ref()
+    }
+
+    pub fn new_task(&mut self) -> TaskHandle {
         let current_task = self
             .tasks
-            .get(self.current.unwrap())
+            .get(&self.current.unwrap())
             .expect("New task creation attempted before boot task initialization.");
         let mut kernel_stack = unsafe {
-            let layout = Layout::new::<KernelStack>();
-            let ptr = alloc(layout) as *mut KernelStack;
-            (*ptr).regs = Registers {
+            let layout = Layout::new::<Task>();
+            let ptr = alloc(layout) as *mut Task;
+            (*ptr).info.registers = Registers {
                 stack_top: 0,
 
                 // Support for separate address space to be added later.
-                cr3: current_task.kernel_stack.regs.cr3,
+                cr3: current_task.info.registers.cr3,
             };
-            (*ptr).stack = [0; KERNEL_STACK_SIZE - size_of::<Registers>()];
+            (*ptr).stack = [0; KERNEL_STACK_SIZE - size_of::<TaskInfo>()];
 
-            (*ptr).stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 8
-                ..KERNEL_STACK_SIZE - size_of::<Registers>()]
+            (*ptr).stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>() - 8)
+                ..(KERNEL_STACK_SIZE - size_of::<TaskInfo>())]
                 .copy_from_slice(&(_task_entry as usize).to_le_bytes());
             Box::from_raw(ptr)
         };
         let id = self.create_task(kernel_stack);
-        let mut task = &mut self.tasks[id];
+        let kernel_stack = self
+            .tasks
+            .get_mut(&id)
+            .expect("Newly created Task must exist!");
         unsafe {
-            task.kernel_stack.stack[KERNEL_STACK_SIZE - size_of::<Registers>() - 16
-                ..KERNEL_STACK_SIZE - size_of::<Registers>() - 8]
+            kernel_stack.stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 16
+                ..(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 8]
                 .copy_from_slice(&id.to_le_bytes());
         }
-        task.kernel_stack.regs.stack_top = &(task.kernel_stack.stack
-            [KERNEL_STACK_SIZE - size_of::<Registers>() - 8 - size_of::<usize>() * 6])
+        kernel_stack.info.registers.stack_top = &(kernel_stack.stack
+            [(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 8 - size_of::<usize>() * 6])
             as *const u8 as usize;
-        id
+        TaskHandle(id)
     }
 
     pub fn init_idle_task(&mut self) {
@@ -115,8 +115,8 @@ impl TaskList {
             out("r9") rsp,
             );
         }
-        idle_task_stack.regs.cr3 = cr3;
-        idle_task_stack.regs.stack_top = rsp;
+        idle_task_stack.info.registers.cr3 = cr3;
+        idle_task_stack.info.registers.stack_top = rsp;
         let id = self.create_task(idle_task_stack);
 
         // Hereafter, we are running as the idle task.
@@ -127,28 +127,35 @@ impl TaskList {
         self.tasks.len()
     }
 
-    fn create_task(&mut self, kernel_stack: Box<KernelStack>) -> usize {
-        let mut task = Task {
-            task_id: 0,
-            kernel_stack,
-        };
-        self.tasks.push(task);
-        let id = self.tasks.len() - 1;
-        self.tasks[id].task_id = id;
+    fn create_task(&mut self, mut kernel_stack: Box<Task>) -> usize {
+        let id = self.next_task_id;
+        kernel_stack.info.task_id = self.next_task_id;
+        self.tasks.insert(id, kernel_stack);
+        self.next_task_id += 1;
         id
     }
 }
 #[repr(C)]
-pub(crate) struct Task {
+pub(crate) struct TaskInfo {
     pub(crate) task_id: usize,
-    kernel_stack: Box<KernelStack>,
+    registers: Registers,
+    pub(crate) flags: TaskFlags,
+    kernel_stack: Box<Task>,
 }
 
-#[repr(C)]
 #[derive(Copy, Clone)]
-pub(crate) struct TaskHandle {
-    pub task_id: usize,
-    pub kernel_stack: *const KernelStack,
+pub struct TaskHandle(usize);
+
+impl fmt::Display for TaskHandle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<TaskHandle> for usize {
+    fn from(value: TaskHandle) -> Self {
+        value.0
+    }
 }
 
 /// Kernel context registers for saving when context switching.
@@ -166,9 +173,25 @@ struct Registers {
 // TODO: put this data structure behind a lock
 // TODO: make this generic over the Registers type.
 #[repr(C, align(0x2000))]
-pub(crate) struct KernelStack {
-    regs: Registers,
-    stack: [u8; (KERNEL_STACK_SIZE - size_of::<Registers>())],
+pub(crate) struct Task {
+    info: TaskInfo,
+    stack: [u8; (KERNEL_STACK_SIZE - size_of::<TaskInfo>())],
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct TaskFlags(u32);
+
+impl TaskFlags {
+    fn is_runnable(&self) -> bool {
+        (self.0 | 1) != 0
+    }
+
+    fn set_is_runnable(&mut self, is_runnable: bool) {
+        match is_runnable {
+            true => self.0 |= 1,
+            false => self.0 &= !1,
+        }
+    }
 }
 
 #[no_mangle]
@@ -181,5 +204,5 @@ unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGu
     }
 
     // Actual code that the task starts running
-    another_task();
+    some_task();
 }
