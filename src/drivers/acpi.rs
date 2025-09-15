@@ -1,9 +1,11 @@
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec;
+use core::error::Error;
 use core::mem::size_of;
 use core::ptr;
 use core::ptr::slice_from_raw_parts;
+use uefi::proto::network::pxe::ReadDirParseError;
 
 pub struct MADT {
     pub lapic_addr: usize,
@@ -11,6 +13,21 @@ pub struct MADT {
     pub global_system_interrupt_base: u32,
 
     pub interrupt_mappings: vec::Vec<InterruptMapping>,
+}
+
+pub struct HPET {
+    pub(crate) hardware_rev_id: u8,
+    pub(crate) comparator_count: u8,
+    pub(crate) counter_size: u8,
+    pub(crate) legacy_replacement_irq_routing_capable: bool,
+    pub(crate) pci_vendor_id: u16,
+    pub(crate) address_space_id: u8,
+    pub(crate) register_bit_width: u8,
+    pub(crate) register_bit_offset: u8,
+    pub(crate) base_address: usize,
+    pub(crate) hpet_number: u8,
+    pub(crate) minimum_tick: u16,
+    pub(crate) page_protection: u8,
 }
 
 #[repr(C)]
@@ -23,6 +40,19 @@ struct _MADT {
     // This is a heterogeneous list.
     // Do some black magic to provide a safe interface.
     int_ctrlr_struct: u8,
+}
+
+#[repr(C)]
+struct _HPET {
+    event_timer_block_id: u32,
+    address_space_id: u8,
+    register_bit_width: u8,
+    register_bit_offset: u8,
+    reserved: u8,
+    base_address: usize,
+    hpet_number: u8,
+    minimum_tick: u16,
+    page_protection: u8,
 }
 
 #[repr(C)]
@@ -66,20 +96,8 @@ struct DescriptionHeader {
     data: u8, // offset 36
 }
 
-pub fn parse_madt(rsdp: *const core::ffi::c_void) -> core::result::Result<MADT, String> {
-    let rsdp = unsafe { ptr::read_unaligned(rsdp as *const RSDP) };
-    assert_eq!(&rsdp.signature, b"RSD PTR ");
-
-    let xsdt_addr = rsdp.xsdt_addr;
-    let xsdt = unsafe { ptr::read_unaligned(xsdt_addr as *const XSDT) };
-    assert_eq!(&xsdt.signature, b"XSDT");
-
-    let len = ((xsdt.length - 36) / 8) as usize;
-    // HACK: since we know the offset of xsdt.entry from the ACPI specs, calculate its address manually.
-    let xsdt_entry_addr = rsdp.xsdt_addr + 36;
-    let xsdt_entry_addr = unsafe { xsdt_entry_addr as *const usize };
-    // let xsdt_entry = unsafe { &*slice_from_raw_parts(xsdt_entry_addr, len) };
-
+pub fn parse_madt(rsdp: *const core::ffi::c_void) -> Result<MADT, String> {
+    let (xsdt_entry_addr, len) = _parse_xsdt(rsdp);
     let mut madt = MADT {
         lapic_addr: 0,
         ioapic_addr: 0,
@@ -97,6 +115,21 @@ pub fn parse_madt(rsdp: *const core::ffi::c_void) -> core::result::Result<MADT, 
     }
 
     Ok(madt)
+}
+
+pub fn parse_hpet(rsdp: *const core::ffi::c_void) -> Result<HPET, String> {
+    let (xsdt_entry_addr, len) = _parse_xsdt(rsdp);
+    for e in 0..len {
+        let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize)) };
+        let header = unsafe { ptr::read_unaligned(entry_addr as *const DescriptionHeader) };
+        let signature = core::str::from_utf8(&header.signature).expect("failed to parse signature");
+
+        match signature {
+            "HPET" => return Ok(_parse_hpet(entry_addr, header.length)),
+            _ => {}
+        };
+    }
+    Err("could not find HPET".to_string())
 }
 
 #[repr(C)]
@@ -142,6 +175,20 @@ struct InterruptSourceOverride {
 pub struct InterruptMapping {
     pub(crate) irq_number: u8,
     pub(crate) global_system_interrupt: u8,
+}
+
+pub fn _parse_xsdt(rsdp: *const core::ffi::c_void) -> (*const usize, usize) {
+    let rsdp = unsafe { ptr::read_unaligned(rsdp as *const RSDP) };
+    assert_eq!(&rsdp.signature, b"RSD PTR ");
+
+    let xsdt_addr = rsdp.xsdt_addr;
+    let xsdt = unsafe { ptr::read_unaligned(xsdt_addr as *const XSDT) };
+    assert_eq!(&xsdt.signature, b"XSDT");
+
+    let len = ((xsdt.length - 36) / 8) as usize;
+    // HACK: since we know the offset of xsdt.entry from the ACPI specs, calculate its address manually.
+    let xsdt_entry_addr = rsdp.xsdt_addr + 36;
+    (xsdt_entry_addr as *const usize, len)
 }
 
 fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
@@ -191,4 +238,29 @@ fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
         head += length as usize;
     }
     madt_info
+}
+
+fn _parse_hpet(hpet_addr: usize, length: u32) -> HPET {
+    let hpet = (hpet_addr + 36) as *const _HPET;
+    let hpet = unsafe { &*hpet };
+
+    // interrupt controller structure contents are within [head, tail)
+    let mut head = hpet_addr + 44;
+    let tail = hpet_addr + length as usize;
+
+    let mut hpet_info = HPET {
+        hardware_rev_id: (hpet.event_timer_block_id & 0xff) as u8,
+        comparator_count: ((hpet.event_timer_block_id >> 8) & 0xf) as u8,
+        counter_size: ((hpet.event_timer_block_id >> 13 ) & 0x1) as u8,
+        legacy_replacement_irq_routing_capable: ((hpet.event_timer_block_id >> 15) & 0x1) != 0,
+        pci_vendor_id: ((hpet.event_timer_block_id >> 16) & 0xffff) as u16,
+        address_space_id: hpet.address_space_id,
+        register_bit_width: hpet.register_bit_width,
+        register_bit_offset: hpet.register_bit_offset,
+        base_address: hpet.base_address,
+        hpet_number: hpet.hpet_number,
+        minimum_tick: hpet.minimum_tick,
+        page_protection: hpet.page_protection,
+    };
+    hpet_info
 }
