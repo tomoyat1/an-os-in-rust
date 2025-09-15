@@ -17,8 +17,8 @@ use core::panic::PanicInfo;
 mod arch;
 use arch::x86_64::interrupt;
 use arch::x86_64::mm::{init_mm, KERNEL_BASE};
-use arch::x86_64::pit;
 use arch::x86_64::pm;
+use arch::x86_64::{hpet, pit};
 
 mod boot;
 mod drivers;
@@ -50,16 +50,19 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let gdt = pm::init();
     let lapic_id = interrupt::init(&madt);
 
-    let hpet = acpi::parse_hpet(boot_data.acpi_rsdp).expect("failed to parse HPET");
-    pit::start();
-
-    pit::register_tick(clock::tick_fn());
+    let hpet = acpi::parse_hpet(boot_data.acpi_rsdp);
+    match hpet {
+        Ok(hpet) => {
+            hpet::init(hpet);
+            hpet::register_tick(clock::tick_fn());
+        }
+        Err(_) => {
+            pit::start();
+            pit::register_tick(clock::tick_fn());
+        }
+    }
 
     serial::init();
-
-    // let stack_top: *mut u8 = 0xffffffffcfffffff as *mut u8;
-    // let stack_top = &mut *stack_top;
-    // *stack_top = 0xde;
 
     // Wait for 1000ms
     sleep(1000);

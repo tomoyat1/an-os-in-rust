@@ -251,7 +251,7 @@ fn _parse_hpet(hpet_addr: usize, length: u32) -> HPET {
     let mut hpet_info = HPET {
         hardware_rev_id: (hpet.event_timer_block_id & 0xff) as u8,
         comparator_count: ((hpet.event_timer_block_id >> 8) & 0xf) as u8,
-        counter_size: ((hpet.event_timer_block_id >> 13 ) & 0x1) as u8,
+        counter_size: ((hpet.event_timer_block_id >> 13) & 0x1) as u8,
         legacy_replacement_irq_routing_capable: ((hpet.event_timer_block_id >> 15) & 0x1) != 0,
         pci_vendor_id: ((hpet.event_timer_block_id >> 16) & 0xffff) as u16,
         address_space_id: hpet.address_space_id,

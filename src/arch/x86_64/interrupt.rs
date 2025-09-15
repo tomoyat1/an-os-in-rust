@@ -2,7 +2,7 @@ use alloc::vec;
 use core::arch::asm;
 use core::ptr::{read_volatile, write_volatile};
 
-use super::pit;
+use super::{hpet, pit};
 use crate::drivers::{acpi, serial};
 use crate::locking::spinlock::WithSpinLock;
 
@@ -11,6 +11,7 @@ extern "C" {
     fn general_protection_fault_isr();
     fn ps2_keyboard_isr();
     fn pit_isr();
+    fn hpet_isr();
     fn com0_isr();
     fn reload_idt(idtr: *const IDTR);
 }
@@ -68,17 +69,19 @@ pub fn init(madt: &acpi::MADT) -> u32 {
     }
 
     // pit handler
-    {
-        let mut descriptor: u128 = 0;
-        let handler = pit_isr as usize;
-        descriptor |= (handler & 0xffff) as u128; // offset 15:0
-        descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
-        descriptor |= 0x8 << 16; // segment selector
-        descriptor |= 0xe << 40; // type: 0b1110
-        descriptor |= 8 << 44; // Present flag
-
-        idt[0x20] = descriptor;
-    }
+    // Disable in hopes that HPET is available.
+    // TODO: register the correct handler at runtime.
+    // {
+    //     let mut descriptor: u128 = 0;
+    //     let handler = pit_isr as usize;
+    //     descriptor |= (handler & 0xffff) as u128; // offset 15:0
+    //     descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
+    //     descriptor |= 0x8 << 16; // segment selector
+    //     descriptor |= 0xe << 40; // type: 0b1110
+    //     descriptor |= 8 << 44; // Present flag
+    //
+    //     idt[0x20] = descriptor;
+    // }
 
     // serial port handler
     {
@@ -91,6 +94,19 @@ pub fn init(madt: &acpi::MADT) -> u32 {
         descriptor |= 8 << 44; // Present flag
 
         idt[0x24] = descriptor;
+    }
+
+    // HPET handler
+    {
+        let mut descriptor: u128 = 0;
+        let handler = hpet_isr as usize;
+        descriptor |= (handler & 0xffff) as u128; // offset 15:0
+        descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
+        descriptor |= 0x8 << 16; // segment selector
+        descriptor |= 0xe << 40; // type: 0b1110
+        descriptor |= 8 << 44; // Present flag
+
+        idt[0x20] = descriptor;
     }
 
     // Interrupt 0x26
@@ -165,6 +181,13 @@ unsafe extern "C" fn pit_handler() {
 }
 
 #[no_mangle]
+unsafe extern "C" fn hpet_handler() {
+    hpet::hpet_tick();
+    let mut lapic = LOCAL_APIC.lock();
+    lapic.write(0xb0, 0)
+}
+
+#[no_mangle]
 unsafe extern "C" fn com0_handler() {
     serial::read_com1();
     let mut lapic = LOCAL_APIC.lock();
@@ -205,9 +228,9 @@ fn mask_pic() {
 }
 
 /// Masks specified I/O APIC line when mask is true.
-pub fn mask_line(mask: bool, vector: u32) {
+pub fn mask_line(mask: bool, line: u32) {
     let ioapic = unsafe { IOAPIC.lock() };
-    ioapic.mask_line(mask, vector);
+    ioapic.mask_line(mask, line);
 }
 
 pub struct IOAPIC {
@@ -256,12 +279,17 @@ impl IOAPIC {
         // Also, we mask PIT until it is properly initialized later.
         // self.write(0x14, 0x10020);
         // self.write(0x15, (lapic_id << 24) & 0x0f000000);
-        self.remap(lapic_id, 2, 0x10020);
+        // self.remap(lapic_id, 2, 0x10020);
 
         // COM 1, 3
         // self.write(0x18, 0x24);
         // self.write(0x19, (lapic_id << 24) & 0x0f000000);
         self.remap(lapic_id, 4, 0x24);
+
+        // HPET
+        // TODO: remap either the PIT or HPET handler depending on availability.
+        // We mask HPET until it is properly initialized later.
+        self.remap(lapic_id, 2, 0x10020);
 
         // Mouse (masked)
         // TODO: how do we know that the mouse is on I/O APIC line 12?
@@ -278,8 +306,8 @@ impl IOAPIC {
         }
     }
 
-    fn mask_line(&self, mask: bool, vector: u32) {
-        let idx = (vector * 2) + 0x10;
+    fn mask_line(&self, mask: bool, line: u32) {
+        let idx = (line * 2) + 0x10;
         let redtlb_low = self.read(idx);
         let redtlb_low = if mask {
             redtlb_low | 0x10000

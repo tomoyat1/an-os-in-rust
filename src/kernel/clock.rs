@@ -7,6 +7,7 @@ use core::sync::atomic::Ordering::Relaxed;
 pub static CLOCK: SyncUnsafeCell<Clock> = SyncUnsafeCell::new(Clock::new());
 
 pub struct Clock {
+    // Ticks since the starting the clock in nanoseconds.
     ticks: AtomicU64,
 }
 
@@ -35,7 +36,7 @@ pub fn sleep(ms: u64) {
     let clock = CLOCK.get();
     let (start, until) = {
         let start = unsafe { (*clock).ticks.load(Relaxed) };
-        let until = start + ms * pit::TICK_INTERVAL / ms;
+        let until = start + ms * 1_000_000;
         (start, until)
     };
     while unsafe { (*clock).ticks.load(Relaxed) } < until {

@@ -25,8 +25,8 @@ impl PIT {
     }
 }
 
-pub unsafe fn start() {
-    let mut pit = unsafe { PIT.lock() };
+pub fn start() {
+    let mut pit = PIT.lock();
     pit.start_rate();
     interrupt::mask_line(false, IOAPIC_LINE);
 }
@@ -52,6 +52,6 @@ impl PIT {
 pub fn pit_tick() {
     let pit = PIT.lock();
     if let Some(tick) = pit.tick {
-        tick(1_000_000_000 / TICK_INTERVAL);
+        tick(TICK_INTERVAL);
     }
 }
