@@ -1,15 +1,18 @@
 use crate::kernel::sched::Scheduler;
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::some_task;
+
 use alloc::alloc::alloc;
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BinaryHeap};
+
 use core::alloc::Layout;
 use core::arch::asm;
 use core::cmp::Ordering;
 use core::fmt::{Formatter, Write};
 use core::mem::{size_of, ManuallyDrop};
 use core::{fmt, mem, ptr};
+use core::ops::DerefMut;
 
 const KERNEL_STACK_SIZE: usize = 0x2000;
 
@@ -43,8 +46,10 @@ impl TaskList {
         Some(TaskHandle(id))
     }
 
-    pub fn set_current_task(&mut self, id: usize) {
+    pub fn set_current_task(&mut self, id: usize, now: u64) {
         self.current = Some(id);
+        let mut task = self.tasks.get_mut(&id).expect("The task set as current must exist");
+        task.info.last_scheduled = now;
     }
 
     pub fn get(&self, id: usize) -> Option<TaskHandle> {
@@ -57,12 +62,13 @@ impl TaskList {
         task.as_ref()
     }
 
-    pub fn increment_score(&mut self, id: TaskHandle) {
+    pub fn update_runtime(&mut self, id: TaskHandle, timestamp: u64) {
         let task = self
             .tasks
             .get_mut(&id.0)
             .expect("Task must exist for handle!");
-        task.info.score += 1;
+        let delta = timestamp - task.info.last_scheduled;
+        task.info.score += delta;
         if task.info.flags.is_runnable() {
             self.schedulable.push(task.info);
         }
@@ -154,6 +160,7 @@ impl TaskList {
 pub(crate) struct TaskInfo {
     pub(crate) task_id: usize,
     registers: Registers,
+    last_scheduled: u64,
     pub(crate) flags: TaskFlags,
     score: u64,
 }

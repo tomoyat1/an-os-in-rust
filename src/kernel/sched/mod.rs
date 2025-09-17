@@ -1,10 +1,12 @@
-use crate::kernel::sched::task::{TaskInfo, TaskList};
-use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::mem::ManuallyDrop;
 use core::ops::Deref;
 use core::{mem, ptr};
+
+use crate::arch::x86_64::hpet;
+use crate::kernel::sched::task::{TaskInfo, TaskList};
+use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 
 mod task;
 
@@ -41,10 +43,13 @@ impl<'a> Handle<'a> {
             .next()
             .expect("Schedulable tasks exhausted.");
         let mut switch_from = self.scheduler.task_list.current_task().unwrap();
-        self.scheduler.task_list.increment_score(switch_from);
+        // Hardcode use of HPET for now.
+        // TODO: abstract clocksources and get time from the trait object.
+        let now = hpet::get_time();
+        self.scheduler.task_list.update_runtime(switch_from, now);
         self.scheduler
             .task_list
-            .set_current_task(usize::from(switch_to));
+            .set_current_task(usize::from(switch_to), now);
         let switch_from = self.scheduler.task_list.get_ptr(switch_from);
         let switch_to = self.scheduler.task_list.get_ptr(switch_to);
 

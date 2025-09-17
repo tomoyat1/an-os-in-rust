@@ -201,6 +201,17 @@ pub fn init(hpet: acpi::HPET) {
     HPET.lock().replace(hpet);
 }
 
+/// Get time in nanoseconds since when the main timer was started.
+pub fn get_time() -> u64 {
+    match HPET.lock().as_mut() {
+        Some(hpet) => {
+            let ticks = hpet.read_main_counter();
+            ticks * hpet.counter_clock_period as u64
+        }
+        None => 0
+    }
+}
+
 pub fn register_tick(tick: fn(u64)) {
     let mut hpet = HPET.lock();
     if let Some(hpet) = hpet.as_mut() {
