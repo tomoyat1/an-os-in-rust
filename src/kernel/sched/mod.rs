@@ -2,6 +2,7 @@ use crate::arch::x86_64::hpet;
 use crate::kernel::clock;
 use crate::kernel::sched::task::{TaskInfo, TaskList};
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
+use crate::panic;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::ffi::c_void;
@@ -82,7 +83,13 @@ impl<'a> Handle<'a> {
     }
 
     pub(crate) fn sleep(mut self, ms: u64) {
-        if let Some(clock) = unsafe { clock::CLOCK.get().as_mut() } {
+        let clock = unsafe {
+            clock::CLOCK
+                .get()
+                .as_mut()
+                .expect("null pointer in UnsafeCell")
+        };
+        if let Some(clock) = clock {
             let (start, until) = {
                 let start = clock.get_tick();
                 let until = start + ms * 1_000_000;
@@ -100,12 +107,13 @@ impl<'a> Handle<'a> {
             clock.callback_at(
                 until,
                 Box::new(move |x| {
-                    // TODO: This callback is deadlocking when trying to obtain the lock on SCHEDULER.
                     SCHEDULER.lock().task_list.set_runnable(current_task, true);
                 }),
             );
 
             self.switch()
+        } else {
+            panic!("system clock is uninitialized");
         }
     }
 }

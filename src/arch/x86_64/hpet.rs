@@ -1,12 +1,15 @@
+use alloc::boxed::Box;
 use alloc::string::String;
+
+use core::arch::asm;
+use core::mem::{offset_of, MaybeUninit};
+use core::ptr;
 
 use crate::arch::x86_64::interrupt;
 use crate::arch::x86_64::interrupt::LOCAL_APIC;
 use crate::drivers::acpi;
+use crate::kernel::clocksource::ClockSource;
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
-use core::arch::asm;
-use core::mem::{offset_of, MaybeUninit};
-use core::ptr;
 
 const REG_GENERAL_CAPABILITY: usize = 0x0;
 const REG_GENERAL_CONFIGURATION: usize = 0x10;
@@ -164,7 +167,19 @@ impl HPET {
     }
 }
 
-pub fn init(hpet: acpi::HPET) {
+impl ClockSource for WithSpinLock<Option<HPET>> {
+    fn get_tick(&self) -> u64 {
+        match HPET.lock().as_mut() {
+            Some(hpet) => {
+                let ticks = hpet.read_main_counter();
+                ticks * hpet.counter_clock_period as u64
+            }
+            None => 0,
+        }
+    }
+}
+
+pub fn init(hpet: acpi::HPET) -> &'static (dyn ClockSource + Sync + Send) {
     let mut hpet = HPET::from_acpi(hpet);
     let timer_0_routing_cap = hpet.timer_routing_capability(0);
 
@@ -199,6 +214,8 @@ pub fn init(hpet: acpi::HPET) {
     interrupt::mask_line(false, 2);
 
     HPET.lock().replace(hpet);
+
+    &HPET
 }
 
 /// Get time in nanoseconds since when the main timer was started.
@@ -208,7 +225,7 @@ pub fn get_time() -> u64 {
             let ticks = hpet.read_main_counter();
             ticks * hpet.counter_clock_period as u64
         }
-        None => 0
+        None => 0,
     }
 }
 

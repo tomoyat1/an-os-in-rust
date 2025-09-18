@@ -53,8 +53,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let hpet = acpi::parse_hpet(boot_data.acpi_rsdp);
     match hpet {
         Ok(hpet) => {
-            hpet::init(hpet);
+            let hpet = hpet::init(hpet);
             hpet::register_tick(clock::tick_fn());
+            clock::init(hpet);
         }
         Err(_) => {
             pit::start();
