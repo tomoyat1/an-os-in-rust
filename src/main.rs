@@ -111,11 +111,10 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 /// This is a placeholder for actual code that a newly created task would run.
 pub unsafe extern "C" fn some_task() {
     loop {
-        sleep(1000);
-        let scheduler = sched::Handle::new();
+        let mut scheduler = sched::Handle::new();
         let current = scheduler.current_task();
         writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
-        scheduler.switch()
+        scheduler.sleep(1000)
     }
 }
 

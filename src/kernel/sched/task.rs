@@ -11,8 +11,8 @@ use core::arch::asm;
 use core::cmp::Ordering;
 use core::fmt::{Formatter, Write};
 use core::mem::{size_of, ManuallyDrop};
-use core::{fmt, mem, ptr};
 use core::ops::DerefMut;
+use core::{fmt, mem, ptr};
 
 const KERNEL_STACK_SIZE: usize = 0x2000;
 
@@ -48,7 +48,10 @@ impl TaskList {
 
     pub fn set_current_task(&mut self, id: usize, now: u64) {
         self.current = Some(id);
-        let mut task = self.tasks.get_mut(&id).expect("The task set as current must exist");
+        let mut task = self
+            .tasks
+            .get_mut(&id)
+            .expect("The task set as current must exist");
         task.info.last_scheduled = now;
     }
 
@@ -68,9 +71,26 @@ impl TaskList {
             .get_mut(&id.0)
             .expect("Task must exist for handle!");
         let delta = timestamp - task.info.last_scheduled;
-        task.info.score += delta;
+        task.info.total_runtime += delta;
         if task.info.flags.is_runnable() {
             self.schedulable.push(task.info);
+        }
+    }
+
+    pub fn set_runnable(&mut self, id: TaskHandle, runnable: bool) {
+        if runnable {
+            let task = self
+                .tasks
+                .get_mut(&usize::from(id))
+                .expect("Task with issued handle must exist");
+            task.info.flags = TaskFlags(0x1);
+            self.schedulable.push(task.info)
+        } else {
+            self.tasks
+                .get_mut(&usize::from(id))
+                .expect("Task with issued handle must exist")
+                .info
+                .flags = TaskFlags(0x0);
         }
     }
 
@@ -93,6 +113,9 @@ impl TaskList {
                 // Support for separate address space to be added later.
                 cr3: current_task.info.registers.cr3,
             };
+            (*ptr).info.flags = TaskFlags(0x1);
+            (*ptr).info.last_scheduled = 0;
+            (*ptr).info.total_runtime = 0;
             (*ptr).stack = [0; KERNEL_STACK_SIZE - size_of::<TaskInfo>()];
 
             (*ptr).stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>() - 8)
@@ -137,6 +160,7 @@ impl TaskList {
         }
         idle_task_stack.info.registers.cr3 = cr3;
         idle_task_stack.info.registers.stack_top = rsp;
+        idle_task_stack.info.flags = TaskFlags(0x1);
         let id = self.create_task(idle_task_stack);
 
         // Hereafter, we are running as the idle task.
@@ -161,18 +185,20 @@ pub(crate) struct TaskInfo {
     pub(crate) task_id: usize,
     registers: Registers,
     last_scheduled: u64,
+    total_runtime: u64,
     pub(crate) flags: TaskFlags,
-    score: u64,
 }
 
 impl PartialEq for TaskInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.score.eq(&other.score)
+        self.total_runtime.eq(&other.total_runtime)
     }
 }
 impl PartialOrd for TaskInfo {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.score.partial_cmp(&other.score).map(|o| o.reverse())
+        self.total_runtime
+            .partial_cmp(&other.total_runtime)
+            .map(|o| o.reverse())
     }
 }
 
@@ -180,7 +206,7 @@ impl Eq for TaskInfo {}
 
 impl Ord for TaskInfo {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.score.cmp(&other.score).reverse()
+        self.total_runtime.cmp(&other.total_runtime).reverse()
     }
 }
 
@@ -224,7 +250,7 @@ pub(crate) struct TaskFlags(u32);
 
 impl TaskFlags {
     fn is_runnable(&self) -> bool {
-        (self.0 | 1) != 0
+        (self.0 & 1) != 0
     }
 
     fn set_is_runnable(&mut self, is_runnable: bool) {

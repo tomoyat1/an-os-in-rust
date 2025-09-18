@@ -1,12 +1,14 @@
+use crate::arch::x86_64::hpet;
+use crate::kernel::clock;
+use crate::kernel::sched::task::{TaskInfo, TaskList};
+use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::ffi::c_void;
 use core::mem::ManuallyDrop;
 use core::ops::Deref;
+use core::sync::atomic::Ordering::Relaxed;
 use core::{mem, ptr};
-
-use crate::arch::x86_64::hpet;
-use crate::kernel::sched::task::{TaskInfo, TaskList};
-use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 
 mod task;
 
@@ -36,12 +38,14 @@ impl<'a> Handle<'a> {
         Self { scheduler }
     }
     pub(crate) fn switch(mut self) {
-        // For now, assume that the list of schedulable tasks is not empty.
-        let switch_to = self
-            .scheduler
-            .task_list
-            .next()
-            .expect("Schedulable tasks exhausted.");
+        // Attempt to get the next task before we put the currently running one back in the queue.
+        // If we have exhausted runnable tasks, pick the kernel idle task (task 0).
+        let switch_to = self.scheduler.task_list.next().unwrap_or(
+            self.scheduler
+                .task_list
+                .get(0)
+                .expect("Kernel task 0 must exist."),
+        );
         let mut switch_from = self.scheduler.task_list.current_task().unwrap();
         // Hardcode use of HPET for now.
         // TODO: abstract clocksources and get time from the trait object.
@@ -75,6 +79,34 @@ impl<'a> Handle<'a> {
             .current_task()
             .expect("No tasks found. Maybe this is called before boot task initialization?");
         t
+    }
+
+    pub(crate) fn sleep(mut self, ms: u64) {
+        if let Some(clock) = unsafe { clock::CLOCK.get().as_mut() } {
+            let (start, until) = {
+                let start = clock.get_tick();
+                let until = start + ms * 1_000_000;
+                (start, until)
+            };
+            let current_task = {
+                let task = self
+                    .scheduler
+                    .task_list
+                    .current_task()
+                    .expect("Current task must exist");
+                self.scheduler.task_list.set_runnable(task, false);
+                task
+            };
+            clock.callback_at(
+                until,
+                Box::new(move |x| {
+                    // TODO: This callback is deadlocking when trying to obtain the lock on SCHEDULER.
+                    SCHEDULER.lock().task_list.set_runnable(current_task, true);
+                }),
+            );
+
+            self.switch()
+        }
     }
 }
 
