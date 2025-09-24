@@ -301,7 +301,6 @@ impl TaskFlags {
 }
 
 #[no_mangle]
-#[linkage = "external"]
 unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>) {
     {
         let mut scheduler = unsafe { ptr::read(scheduler) };

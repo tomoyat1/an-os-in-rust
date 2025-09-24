@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![no_builtins]
-#![feature(linkage)]
 #![feature(alloc_error_handler)]
 #![allow(unused)]
 #![allow(unused_unsafe)]
@@ -39,7 +38,6 @@ mod locking;
 mod net;
 
 #[no_mangle]
-#[linkage = "external"]
 /// start() is the entry point for kernel code.
 /// # Arguments
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
@@ -106,8 +104,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     }
 }
 
-#[no_mangle]
-#[linkage = "external"]
+#[unsafe(no_mangle)]
 /// This is a placeholder for actual code that a newly created task would run.
 pub unsafe extern "C" fn some_task() {
     loop {
