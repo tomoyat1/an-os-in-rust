@@ -13,6 +13,8 @@ use core::{mem, ptr};
 
 mod task;
 
+const SCHED_LATENCY: u64 = 20_000_000; // 20 ms.
+
 extern "C" {
     fn _do_switch(
         from: *const task::Task,
@@ -38,8 +40,16 @@ impl<'a> Handle<'a> {
         let scheduler = unsafe { SCHEDULER.lock() };
         Self { scheduler }
     }
+
     pub(crate) fn switch(mut self) {
-        // Attempt to get the next task before we put the currently running one back in the queue.
+        // Hardcode use of HPET for now.
+        // TODO: abstract clocksources and get time from the trait object.
+        let now = hpet::get_time();
+
+        let mut switch_from = self.scheduler.task_list.current_task().unwrap();
+
+        self.scheduler.task_list.update_runtime(switch_from, now);
+
         // If we have exhausted runnable tasks, pick the kernel idle task (task 0).
         let switch_to = self.scheduler.task_list.next().unwrap_or(
             self.scheduler
@@ -47,14 +57,11 @@ impl<'a> Handle<'a> {
                 .get(0)
                 .expect("Kernel task 0 must exist."),
         );
-        let mut switch_from = self.scheduler.task_list.current_task().unwrap();
-        // Hardcode use of HPET for now.
-        // TODO: abstract clocksources and get time from the trait object.
-        let now = hpet::get_time();
-        self.scheduler.task_list.update_runtime(switch_from, now);
         self.scheduler
             .task_list
-            .set_current_task(usize::from(switch_to), now);
+            .set_current_task(switch_to.into(), now);
+        self.scheduler.task_list.set_run_until(switch_to, now);
+
         let switch_from = self.scheduler.task_list.get_ptr(switch_from);
         let switch_to = self.scheduler.task_list.get_ptr(switch_to);
 
@@ -119,6 +126,19 @@ impl<'a> Handle<'a> {
 }
 
 pub(crate) fn init() {
-    let mut scheduler = unsafe { SCHEDULER.lock() };
-    scheduler.task_list.init_idle_task()
+    let mut handle = Handle::new();
+    handle.scheduler.task_list.init_idle_task();
+
+    // Switch into the idle task.
+    handle.switch()
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn check_runtime() {
+    let now = hpet::get_time();
+    let mut handle = Handle::new();
+    let current = handle.current_task();
+    if handle.scheduler.task_list.get_run_until(current) <= now {
+        handle.switch()
+    }
 }

@@ -2,6 +2,7 @@ use super::interrupt;
 use super::port;
 use crate::kernel::clock;
 use crate::kernel::clock::Clock;
+use crate::kernel::clocksource::ClockSource;
 use crate::locking::spinlock::WithSpinLock;
 
 const CHAN0_DATA: u8 = 0x40;
@@ -25,12 +26,6 @@ impl PIT {
     }
 }
 
-pub fn start() {
-    let mut pit = PIT.lock();
-    pit.start_rate();
-    interrupt::mask_line(false, IOAPIC_LINE);
-}
-
 pub fn register_tick(tick: fn(u64)) {
     let mut pid = PIT.lock();
     pid.tick = Some(tick);
@@ -49,6 +44,7 @@ impl PIT {
         }
     }
 }
+
 pub fn pit_tick() {
     let pit = PIT.lock();
     if let Some(tick) = pit.tick {

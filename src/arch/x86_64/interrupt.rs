@@ -202,7 +202,7 @@ pub fn register_handler(vector: u8, handler: extern "C" fn(u64)) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn device_handler(vector: u64) {
+extern "C" fn device_handler(vector: u64) {
     // SAFETY: NOT safe, because the static mut [usize; 128] is not behind any lock.
     let handler = unsafe { IRQ_HANDLERS[vector as usize] } as *const ();
 
@@ -334,13 +334,13 @@ impl LocalAPIC {
 
     /// Read register at index.
     fn read(&self, index: usize) -> u32 {
-        let reg = (self.base_addr + index as usize) as *mut u32;
+        let reg = (self.base_addr + index) as *mut u32;
         unsafe { *reg }
     }
 
     // Write register at index.
     fn write(&self, index: usize, value: u32) {
-        let mut reg = (self.base_addr + index as usize) as *mut u32;
+        let mut reg = (self.base_addr + index) as *mut u32;
         unsafe { write_volatile(reg, value) }
     }
 

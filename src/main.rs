@@ -48,37 +48,36 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let madt = acpi::parse_madt(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
     init_mm(boot_data.memory_map); // TODO: error handling
     let gdt = pm::init();
+
+    sched::init();
+
     let lapic_id = interrupt::init(&madt);
 
+    serial::init();
+    serial::tmp_write_com1(b"[OK]\tSerial console initialized\n");
+
     let hpet = acpi::parse_hpet(boot_data.acpi_rsdp);
-    match hpet {
+    let clock = match hpet {
         Ok(hpet) => {
             let hpet = hpet::init(hpet);
             hpet::register_tick(clock::tick_fn());
             clock::init(hpet);
+            hpet
         }
         Err(_) => {
-            pit::start();
-            pit::register_tick(clock::tick_fn());
+            // pit::start();
+            // pit::register_tick(clock::tick_fn());
+            panic!("No supported clocksource found!")
         }
-    }
-
-    serial::init();
-
-    // Wait for 1000ms
-    sleep(1000);
-
-    sched::init();
-
-    serial::tmp_write_com1(b"Done\n");
+    };
 
     // Initialize PCI devices
     pci::init(lapic_id);
     let nics = rtl8139::init(&madt.interrupt_mappings);
     if nics == 1 {
-        serial::tmp_write_com1(b"RTL8139 FOUND\n");
+        serial::tmp_write_com1(b"[OK]\tRTL8139 NIC initialized\n");
     } else {
-        serial::tmp_write_com1(b"NO NIC\n")
+        serial::tmp_write_com1(b"[OK]\tNo NICs found\n")
     }
 
     // Create several tasks to demonstrate switching.

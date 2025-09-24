@@ -58,7 +58,6 @@ unsafe impl alloc::GlobalAlloc for WithLock<KernelAllocator> {
     }
 }
 
-#[alloc_error_handler]
 #[no_mangle]
 fn oom(_: alloc::Layout) -> ! {
     unsafe { panic!("oom") }

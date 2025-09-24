@@ -1,4 +1,5 @@
-use crate::kernel::sched::Scheduler;
+use crate::arch::x86_64::hpet;
+use crate::kernel::sched::{Scheduler, SCHED_LATENCY};
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::some_task;
 
@@ -60,21 +61,45 @@ impl TaskList {
         Some(TaskHandle(id))
     }
 
+    pub fn get_mut(&mut self, id: TaskHandle) -> &mut Task {
+        let task = self.tasks.get_mut(&id.0).unwrap();
+        task.as_mut()
+    }
+
     pub fn get_ptr(&self, id: TaskHandle) -> *const Task {
         let task = self.tasks.get(&id.0).expect("Task must exist for handle!");
         task.as_ref()
     }
 
     pub fn update_runtime(&mut self, id: TaskHandle, timestamp: u64) {
+        let task_count = self.tasks.len();
         let task = self
             .tasks
             .get_mut(&id.0)
             .expect("Task must exist for handle!");
         let delta = timestamp - task.info.last_scheduled;
+        let delta = delta * task_count as u64;
         task.info.total_runtime += delta;
         if task.info.flags.is_runnable() {
             self.schedulable.push(task.info);
         }
+    }
+
+    pub fn get_run_until(&self, id: TaskHandle) -> u64 {
+        let task = self
+            .tasks
+            .get(&usize::from(id))
+            .expect("Task must exist for handle");
+        task.info.run_until
+    }
+
+    pub fn set_run_until(&mut self, id: TaskHandle, begin_at: u64) {
+        let len = self.tasks.len() as u64;
+        let task = self
+            .tasks
+            .get_mut(&usize::from(id))
+            .expect("Task must exist for handle");
+        task.info.run_until = begin_at + SCHED_LATENCY / len;
     }
 
     pub fn set_runnable(&mut self, id: TaskHandle, runnable: bool) {
@@ -86,11 +111,11 @@ impl TaskList {
             task.info.flags = TaskFlags(0x1);
             self.schedulable.push(task.info)
         } else {
-            self.tasks
+            let mut task = self
+                .tasks
                 .get_mut(&usize::from(id))
-                .expect("Task with issued handle must exist")
-                .info
-                .flags = TaskFlags(0x0);
+                .expect("Task with issued handle must exist");
+            task.info.flags = TaskFlags(0x0)
         }
     }
 
@@ -158,9 +183,21 @@ impl TaskList {
             out("r9") rsp,
             );
         }
-        idle_task_stack.info.registers.cr3 = cr3;
-        idle_task_stack.info.registers.stack_top = rsp;
-        idle_task_stack.info.flags = TaskFlags(0x1);
+
+        // TODO: abstract clocksources and get time from the trait object.
+        let now = hpet::get_time();
+
+        idle_task_stack.info = TaskInfo {
+            task_id: 0,
+            registers: Registers {
+                stack_top: rsp,
+                cr3,
+            },
+            last_scheduled: now,
+            run_until: 0,
+            total_runtime: 0,
+            flags: TaskFlags(0x1),
+        };
         let id = self.create_task(idle_task_stack);
 
         // Hereafter, we are running as the idle task.
@@ -185,6 +222,7 @@ pub(crate) struct TaskInfo {
     pub(crate) task_id: usize,
     registers: Registers,
     last_scheduled: u64,
+    run_until: u64,
     total_runtime: u64,
     pub(crate) flags: TaskFlags,
 }
