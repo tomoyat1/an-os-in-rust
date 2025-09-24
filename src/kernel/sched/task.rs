@@ -15,7 +15,8 @@ use core::mem::{size_of, ManuallyDrop};
 use core::ops::DerefMut;
 use core::{fmt, mem, ptr};
 
-const KERNEL_STACK_SIZE: usize = 0x2000;
+pub const KERNEL_STACK_SIZE: usize = 0x2000;
+const TASK_STRUCT_MASK: usize = (KERNEL_STACK_SIZE - 1) ^ 0xffff_ffff_ffff_ffff;
 
 extern "C" {
     #[link_name = "boot_stack_top"]
@@ -310,4 +311,20 @@ unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGu
 
     // Actual code that the task starts running
     some_task();
+}
+
+pub(crate) fn current_task() -> TaskHandle {
+    // SAFETY: When a Task is created, its Task struct is placed at the bottom of the 8192 byte
+    //         kernel stack, or the top of the 8192 contiguous bytes of memory allocated.
+    //         Once created it is never moved or deallocated until the Task ends. Therefore, it is
+    //         safe to mask %rsp to get the top of the 8192 byte region of memory that it points to
+    //         and use that as the address of the Task struct.
+    let task = unsafe {
+        let rsp: usize;
+        asm!("mov {}, rsp", out(reg) rsp);
+        let task = rsp & TASK_STRUCT_MASK;
+        let task = task as *const Task;
+        &*task
+    };
+    TaskHandle(task.info.task_id)
 }
