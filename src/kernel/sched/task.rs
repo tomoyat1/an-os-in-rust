@@ -29,6 +29,8 @@ pub(crate) struct TaskList {
     next_task_id: usize,
     current: Option<usize>,
     tasks: BTreeMap<usize, Box<Task>>,
+
+    // TODO: ensure at type level that this only contains runnable tasks.
     schedulable: BinaryHeap<TaskInfo>,
 }
 
@@ -72,6 +74,8 @@ impl TaskList {
         task.as_ref()
     }
 
+    // TODO: ensure at type level that this is only called on a running task, and not on a runnable
+    //       or blocked one.
     pub fn update_runtime(&mut self, id: TaskHandle, timestamp: u64) {
         let task_count = self.tasks.len();
         let task = self
@@ -81,6 +85,9 @@ impl TaskList {
         let delta = timestamp - task.info.last_scheduled;
         let delta = delta * task_count as u64;
         task.info.total_runtime += delta;
+
+        // We do not need to first remove the task from the schedulable queue, because update_runtime
+        // is called on a running task, which by definition is not in the schedulable queue.
         if task.info.flags.is_runnable() {
             self.schedulable.push(task.info);
         }
@@ -104,6 +111,9 @@ impl TaskList {
     }
 
     pub fn set_runnable(&mut self, id: TaskHandle, runnable: bool) {
+        // O(n) complexity over number of tasks in the queue.
+        self.schedulable.retain(|x| x.task_id != id.into());
+
         if runnable {
             let task = self
                 .tasks
