@@ -30,7 +30,6 @@ extern "C" {
 
 pub(crate) struct TaskList {
     next_task_id: usize,
-    current: Option<usize>,
     tasks: BTreeMap<usize, Arc<Task>>,
 
     // TODO: ensure at type level that this only contains runnable tasks.
@@ -41,20 +40,12 @@ impl TaskList {
     pub const fn new() -> Self {
         Self {
             next_task_id: 0,
-            current: None,
             tasks: BTreeMap::new(),
             schedulable: BinaryHeap::new(),
         }
     }
 
-    pub fn current_task(&self) -> Option<TaskHandle> {
-        let id = self.current?;
-        let _ = self.tasks.get(&id)?;
-        Some(TaskHandle(id))
-    }
-
     pub fn set_current_task(&mut self, id: usize, now: u64) {
-        self.current = Some(id);
         let mut task = self
             .tasks
             .get_mut(&id)
@@ -144,7 +135,7 @@ impl TaskList {
     pub fn new_task(&mut self) -> TaskHandle {
         let current_task = self
             .tasks
-            .get(&self.current.unwrap())
+            .get(&current_task().0)
             .expect("New task creation attempted before boot task initialization.");
         let mut kernel_stack = unsafe {
             let layout = Layout::new::<Task>();
@@ -208,9 +199,6 @@ impl TaskList {
             flags: TaskFlags(0x1.into()),
         };
         let id = self.create_task(idle_task_stack);
-
-        // Hereafter, we are running as the idle task.
-        self.current = Some(id);
     }
 
     pub fn len(&self) -> usize {
