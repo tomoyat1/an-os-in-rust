@@ -1,6 +1,6 @@
 use crate::arch::x86_64::hpet;
 use crate::kernel::sched::{Scheduler, SCHED_LATENCY};
-use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
+use crate::locking::spinlock::WithSpinLockGuard;
 use crate::some_task;
 
 use alloc::alloc::alloc;
@@ -298,6 +298,7 @@ impl Ord for Task {
     }
 }
 
+#[repr(C)]
 #[derive(Debug)]
 pub(crate) struct TaskFlags(AtomicU32);
 
