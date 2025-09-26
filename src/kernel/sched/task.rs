@@ -1,6 +1,6 @@
 use crate::arch::x86_64::hpet;
 use crate::kernel::sched::{Scheduler, SCHED_LATENCY};
-use crate::locking::spinlock::WithSpinLockGuard;
+use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::some_task;
 
 use alloc::alloc::alloc;
@@ -11,6 +11,7 @@ use core::alloc::Layout;
 use core::arch::asm;
 use core::cell::Cell;
 use core::cmp::Ordering;
+use core::ffi::c_void;
 use core::fmt::{Formatter, Write};
 use core::mem::{size_of, ManuallyDrop};
 use core::ops::DerefMut;
@@ -23,7 +24,7 @@ const TASK_STRUCT_MASK: usize = (KERNEL_STACK_SIZE - 1) ^ 0xffff_ffff_ffff_ffff;
 
 extern "C" {
     #[link_name = "boot_stack_top"]
-    static mut boot_stack: Task;
+    static mut boot_stack: *const c_void;
 
     fn _task_entry();
 }
@@ -50,7 +51,7 @@ impl TaskList {
             .tasks
             .get_mut(&id)
             .expect("The task set as current must exist");
-        task.info.last_scheduled.store(now, SeqCst);
+        task.info.lock().last_scheduled = now;
     }
 
     pub fn get(&self, id: usize) -> Option<TaskHandle> {
@@ -63,9 +64,10 @@ impl TaskList {
         task
     }
 
-    pub fn get_ptr(&self, id: TaskHandle) -> *const Task {
+    pub fn get_info(&self, id: TaskHandle) -> *const TaskInfo {
         let task = self.tasks.get(&id.0).expect("Task must exist for handle!");
-        task.as_ref()
+        let info = task.info.lock();
+        &*info as *const TaskInfo
     }
 
     // TODO: ensure at type level that this is only called on a running task, and not on a runnable
@@ -76,13 +78,13 @@ impl TaskList {
             .tasks
             .get_mut(&id.0)
             .expect("Task must exist for handle!");
-        let delta = timestamp - task.info.last_scheduled.load(SeqCst);
+        let delta = timestamp - task.info.lock().last_scheduled;
         let delta = delta * task_count as u64;
-        task.info.total_runtime.fetch_add(delta, SeqCst);
+        task.info.lock().total_runtime += delta;
 
         // We do not need to first remove the task from the schedulable queue, because update_runtime
         // is called on a running task, which by definition is not in the schedulable queue.
-        if (&task.info.flags).is_runnable() {
+        if (&task.info.lock().flags).is_runnable() {
             self.schedulable.push(task.clone());
         }
     }
@@ -92,7 +94,7 @@ impl TaskList {
             .tasks
             .get(&usize::from(id))
             .expect("Task must exist for handle");
-        task.info.run_until.load(SeqCst)
+        task.info.lock().run_until
     }
 
     pub fn set_run_until(&mut self, id: TaskHandle, begin_at: u64) {
@@ -101,14 +103,13 @@ impl TaskList {
             .tasks
             .get_mut(&usize::from(id))
             .expect("Task must exist for handle");
-        task.info
-            .run_until
-            .store((begin_at + SCHED_LATENCY / len), SeqCst);
+        task.info.lock().run_until = (begin_at + SCHED_LATENCY / len);
     }
 
     pub fn set_runnable(&mut self, id: TaskHandle, runnable: bool) {
         // O(n) complexity over number of tasks in the queue.
-        self.schedulable.retain(|x| x.info.task_id != id.into());
+        self.schedulable
+            .retain(|x| x.info.lock().task_id != id.into());
 
         if runnable {
             let task = self
@@ -116,20 +117,21 @@ impl TaskList {
                 .get_mut(&usize::from(id))
                 .expect("Task with issued handle must exist");
 
-            task.info.flags.0.store(0x1, SeqCst);
+            task.info.lock().flags.0 = 0x1;
             self.schedulable.push(task.clone())
         } else {
             let mut task = self
                 .tasks
                 .get_mut(&usize::from(id))
                 .expect("Task with issued handle must exist");
-            task.info.flags.0.store(0x0, SeqCst);
+            task.info.lock().flags.0 = 0x0;
         }
     }
 
     pub fn next(&mut self) -> Option<TaskHandle> {
         let next = self.schedulable.pop()?;
-        Some(TaskHandle(next.info.task_id))
+        let id = next.info.lock().task_id;
+        Some(TaskHandle(id))
     }
 
     pub fn new_task(&mut self) -> TaskHandle {
@@ -140,15 +142,15 @@ impl TaskList {
         let mut kernel_stack = unsafe {
             let layout = Layout::new::<Task>();
             let ptr = alloc(layout) as *mut Task;
-            (*ptr).info.registers = Registers {
-                stack_top: 0.into(),
+            (*ptr).info.lock().registers = Registers {
+                stack_top: 0,
 
                 // Support for separate address space to be added later.
-                cr3: current_task.info.registers.cr3,
+                cr3: current_task.info.lock().registers.cr3,
             };
-            (*ptr).info.flags = TaskFlags(0x1.into());
-            (*ptr).info.last_scheduled = 0.into();
-            (*ptr).info.total_runtime = 0.into();
+            (*ptr).info.lock().flags = TaskFlags(0x1);
+            (*ptr).info.lock().last_scheduled = 0;
+            (*ptr).info.lock().total_runtime = 0;
             (*ptr).stack = [0; KERNEL_STACK_SIZE - size_of::<TaskInfo>()];
 
             (*ptr).stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>() - 8)
@@ -167,9 +169,9 @@ impl TaskList {
 
     pub fn init_idle_task(&mut self) {
         // We only read the address
-        let mut idle_task_stack = unsafe { &raw mut boot_stack };
+        let mut idle_task_stack = unsafe { &raw mut boot_stack as *mut Task };
 
-        // SAFETY: The idle_task_stack never goes out of scope, as long as the kernel is running.
+        // SAFETY: The idle_task_stack never goes out of scope as long as the kernel is running.
         //         Therefore, it is safe to pretend that the memory for the stack was allocated
         //         by the GlobalAllocator, even if it wasn't.
         let mut idle_task_stack = unsafe { Box::from_raw(idle_task_stack) };
@@ -187,17 +189,17 @@ impl TaskList {
         // TODO: abstract clocksources and get time from the trait object.
         let now = hpet::get_time();
 
-        idle_task_stack.info = TaskInfo {
+        idle_task_stack.info = WithSpinLock::new(TaskInfo {
             task_id: 0,
             registers: Registers {
                 stack_top: rsp.into(),
                 cr3,
             },
             last_scheduled: now.into(),
-            run_until: 0.into(),
-            total_runtime: 0.into(),
-            flags: TaskFlags(0x1.into()),
-        };
+            run_until: 0,
+            total_runtime: 0,
+            flags: TaskFlags(0x1),
+        });
         let id = self.create_task(idle_task_stack);
     }
 
@@ -207,18 +209,15 @@ impl TaskList {
 
     fn create_task(&mut self, mut kernel_stack: Box<Task>) -> usize {
         let id = self.next_task_id;
-        kernel_stack.info.task_id = self.next_task_id;
+        kernel_stack.info.lock().task_id = self.next_task_id;
         unsafe {
             kernel_stack.stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 16
                 ..(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 8]
                 .copy_from_slice(&id.to_le_bytes());
         }
-        kernel_stack.info.registers.stack_top.store(
-            (&(kernel_stack.stack
-                [(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 8 - size_of::<usize>() * 6])
-                as *const u8 as usize),
-            SeqCst,
-        );
+        kernel_stack.info.lock().registers.stack_top = &(kernel_stack.stack
+            [(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 8 - size_of::<usize>() * 6])
+            as *const u8 as usize;
         self.tasks.insert(id, Arc::from(kernel_stack));
         self.next_task_id += 1;
         id
@@ -228,9 +227,9 @@ impl TaskList {
 pub(crate) struct TaskInfo {
     pub(crate) task_id: usize,
     registers: Registers,
-    last_scheduled: AtomicU64,
-    run_until: AtomicU64,
-    total_runtime: AtomicU64,
+    last_scheduled: u64,
+    run_until: u64,
+    total_runtime: u64,
     pub(crate) flags: TaskFlags,
 }
 
@@ -254,7 +253,7 @@ impl From<TaskHandle> for usize {
 struct Registers {
     // TODO: move the following to architecture specific type and make Task generic
     /// `stack_top` is the value of the stack pointer register.
-    stack_top: AtomicUsize,
+    stack_top: usize,
 
     /// `cr3` is the address of the highest level page table (PML4 in x86-64)
     cr3: usize,
@@ -264,24 +263,24 @@ struct Registers {
 // TODO: make this generic over the Registers type.
 #[repr(C, align(0x2000))]
 pub(crate) struct Task {
-    info: TaskInfo,
+    info: WithSpinLock<TaskInfo>,
     stack: [u8; (KERNEL_STACK_SIZE - size_of::<TaskInfo>())],
 }
 
 impl PartialEq for Task {
     fn eq(&self, other: &Self) -> bool {
         self.info
+            .lock()
             .total_runtime
-            .load(SeqCst)
-            .eq(&other.info.total_runtime.load(SeqCst))
+            .eq(&other.info.lock().total_runtime)
     }
 }
 impl PartialOrd for Task {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.info
+            .lock()
             .total_runtime
-            .load(SeqCst)
-            .partial_cmp(&other.info.total_runtime.load(SeqCst))
+            .partial_cmp(&other.info.lock().total_runtime)
             .map(|o| o.reverse())
     }
 }
@@ -291,26 +290,26 @@ impl Eq for Task {}
 impl Ord for Task {
     fn cmp(&self, other: &Self) -> Ordering {
         self.info
+            .lock()
             .total_runtime
-            .load(SeqCst)
-            .cmp(&other.info.total_runtime.load(SeqCst))
+            .cmp(&other.info.lock().total_runtime)
             .reverse()
     }
 }
 
 #[repr(C)]
 #[derive(Debug)]
-pub(crate) struct TaskFlags(AtomicU32);
+pub(crate) struct TaskFlags(u32);
 
 impl TaskFlags {
     fn is_runnable(&self) -> bool {
-        (self.0.load(SeqCst) & 1) != 0
+        (self.0 & 1) != 0
     }
 
     fn set_is_runnable(&mut self, is_runnable: bool) {
         match is_runnable {
-            true => self.0.fetch_or(1, SeqCst),
-            false => self.0.fetch_and(!1, SeqCst),
+            true => self.0 |= 1,
+            false => self.0 &= !1,
         };
     }
 }
@@ -340,5 +339,5 @@ pub(crate) fn current_task() -> TaskHandle {
         let task = task as *const Task;
         &*task
     };
-    TaskHandle(task.info.task_id)
+    TaskHandle(task.info.lock().task_id)
 }

@@ -21,8 +21,8 @@ const SCHED_LATENCY: u64 = 20_000_000; // 20 ms.
 
 extern "C" {
     fn _do_switch(
-        from: *const task::Task,
-        to: *const task::Task,
+        from: *const TaskInfo,
+        to: *const TaskInfo,
         scheduler: *mut c_void,
     ) -> *mut c_void;
 }
@@ -53,8 +53,8 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
         self.task_list.set_current_task(switch_to.into(), now);
         self.task_list.set_run_until(switch_to, now);
 
-        let switch_from = self.task_list.get_ptr(switch_from);
-        let switch_to = self.task_list.get_ptr(switch_to);
+        let switch_from = self.task_list.get_info(switch_from);
+        let switch_to = self.task_list.get_info(switch_to);
 
         let mut scheduler = ManuallyDrop::new(self);
         unsafe {
