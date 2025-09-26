@@ -7,13 +7,13 @@ use spin::MutexGuard;
 use crate::kernel::sched;
 
 pub struct WithSpinLock<A> {
-    inner: SyncUnsafeCell<spin::Mutex<A>>,
+    inner: spin::Mutex<A>,
 }
 
 impl<A> WithSpinLock<A> {
     pub const fn new(a: A) -> Self {
         Self {
-            inner: SyncUnsafeCell::new(spin::Mutex::new(a)),
+            inner: spin::Mutex::new(a),
         }
     }
 
@@ -33,8 +33,7 @@ impl<A> WithSpinLock<A> {
         }
 
         // SAFETY: Access exclusivity is guaranteed through the spinlock Mutex.
-        let spin_mutex = unsafe { &mut *self.inner.get() };
-        let guard = spin_mutex.lock();
+        let guard = self.inner.lock();
 
         WithSpinLockGuard {
             inner: guard,
