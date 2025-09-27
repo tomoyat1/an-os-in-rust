@@ -1,10 +1,11 @@
 use crate::arch::x86_64::hpet;
 use crate::kernel::clock;
-use crate::kernel::sched::task::{TaskInfo, TaskList};
+use crate::kernel::sched::task::{Task, TaskInfo, TaskList};
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::panic;
 
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use core::arch::asm;
@@ -15,7 +16,6 @@ use core::sync::atomic::Ordering::Relaxed;
 use core::{mem, ptr};
 
 mod task;
-pub(crate) use task::current_task;
 
 const SCHED_LATENCY: u64 = 20_000_000; // 20 ms.
 
@@ -36,28 +36,30 @@ static SCHEDULER: WithSpinLock<Scheduler> = WithSpinLock::new(Scheduler {
 });
 
 impl<'a> WithSpinLockGuard<'a, Scheduler> {
+    pub(crate) fn current_task(&self) -> Arc<Task> {
+        self.task_list.current_task()
+    }
     pub(crate) fn switch(mut self) {
         // Hardcode use of HPET for now.
         // TODO: abstract clocksources and get time from the trait object.
         let now = hpet::get_time();
 
-        let mut switch_from = current_task();
+        let switch_from = self.current_task();
 
-        self.task_list.update_runtime(switch_from, now);
+        self.task_list.end_timeslice(&switch_from, now);
 
         // If we have exhausted runnable tasks, pick the kernel idle task (task 0).
+        // TODO: make the scheduler spin loop if there are no runnable tasks.
         let switch_to = self
             .task_list
             .next()
             .unwrap_or(self.task_list.get(0).expect("Kernel task 0 must exist."));
-        self.task_list.set_current_task(switch_to.into(), now);
-        self.task_list.set_run_until(switch_to, now);
-
-        let switch_from = self.task_list.get_info(switch_from);
-        let switch_to = self.task_list.get_info(switch_to);
+        self.task_list.begin_timeslice(&switch_to, now);
 
         let mut scheduler = ManuallyDrop::new(self);
         unsafe {
+            let switch_from = switch_from.get_info_ptr();
+            let switch_to = switch_to.get_info_ptr();
             let mut scheduler =
                 ptr::read(
                     _do_switch(switch_from, switch_to, &raw mut scheduler as *mut c_void)
@@ -67,7 +69,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
         };
     }
 
-    pub(crate) fn new_task(&mut self) -> task::TaskHandle {
+    pub(crate) fn new_task(&mut self) -> Arc<Task> {
         self.task_list.new_task()
     }
 
@@ -85,14 +87,14 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
                 (start, until)
             };
             let current_task = {
-                let task = current_task();
-                self.task_list.set_runnable(task, false);
+                let task = self.task_list.current_task();
+                self.task_list.set_runnable(&task, false);
                 task
             };
             clock.callback_at(
                 until,
                 Box::new(move |x| {
-                    SCHEDULER.lock().task_list.set_runnable(current_task, true);
+                    SCHEDULER.lock().task_list.set_runnable(&current_task, true);
                 }),
             );
 
@@ -118,9 +120,9 @@ pub(crate) fn lock() -> WithSpinLockGuard<'static, Scheduler> {
 #[unsafe(no_mangle)]
 extern "C" fn check_runtime() {
     let now = hpet::get_time();
-    let mut handle = SCHEDULER.lock();
-    let current = current_task();
-    if handle.task_list.get_run_until(current) <= now {
-        handle.switch()
+    let mut scheduler = SCHEDULER.lock();
+    let current = scheduler.current_task();
+    if current.get_run_until() <= now {
+        scheduler.switch()
     }
 }
