@@ -6,6 +6,7 @@ use crate::some_task;
 use alloc::alloc::alloc;
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BinaryHeap};
+use alloc::format;
 use alloc::sync::Arc;
 use core::alloc::Layout;
 use core::arch::asm;
@@ -46,38 +47,25 @@ impl TaskList {
         }
     }
 
-    pub fn set_current_task(&mut self, id: usize, now: u64) {
-        let mut task = self
-            .tasks
-            .get_mut(&id)
-            .expect("The task set as current must exist");
-        task.info.lock().last_scheduled = now;
+    // Remove when the scheduler itself is able to wait for runnable Tasks.
+    #[deprecated]
+    pub fn get(&self, id: usize) -> Option<Arc<Task>> {
+        let task = self.tasks.get(&id)?;
+        Some(task.clone())
     }
 
-    pub fn get(&self, id: usize) -> Option<TaskHandle> {
-        let _ = self.tasks.get(&id)?;
-        Some(TaskHandle(id))
-    }
-
-    pub fn get_mut(&mut self, id: TaskHandle) -> &mut Arc<Task> {
-        let task = self.tasks.get_mut(&id.0).unwrap();
-        task
-    }
-
-    pub fn get_info(&self, id: TaskHandle) -> *const TaskInfo {
-        let task = self.tasks.get(&id.0).expect("Task must exist for handle!");
-        let info = task.info.lock();
-        &*info as *const TaskInfo
+    // TODO: ensure at the type level that this is only called on a runnable task, and not on a
+    //       blocked or running one
+    pub fn begin_timeslice(&mut self, task: &Arc<Task>, begin_at: u64) {
+        task.info.lock().last_scheduled = begin_at;
+        let len = self.tasks.len() as u64;
+        task.info.lock().run_until = (begin_at + SCHED_LATENCY / len);
     }
 
     // TODO: ensure at type level that this is only called on a running task, and not on a runnable
     //       or blocked one.
-    pub fn update_runtime(&mut self, id: TaskHandle, timestamp: u64) {
+    pub fn end_timeslice(&mut self, task: &Arc<Task>, timestamp: u64) {
         let task_count = self.tasks.len();
-        let task = self
-            .tasks
-            .get_mut(&id.0)
-            .expect("Task must exist for handle!");
         let delta = timestamp - task.info.lock().last_scheduled;
         let delta = delta * task_count as u64;
         task.info.lock().total_runtime += delta;
@@ -89,56 +77,26 @@ impl TaskList {
         }
     }
 
-    pub fn get_run_until(&self, id: TaskHandle) -> u64 {
-        let task = self
-            .tasks
-            .get(&usize::from(id))
-            .expect("Task must exist for handle");
-        task.info.lock().run_until
-    }
-
-    pub fn set_run_until(&mut self, id: TaskHandle, begin_at: u64) {
-        let len = self.tasks.len() as u64;
-        let task = self
-            .tasks
-            .get_mut(&usize::from(id))
-            .expect("Task must exist for handle");
-        task.info.lock().run_until = (begin_at + SCHED_LATENCY / len);
-    }
-
-    pub fn set_runnable(&mut self, id: TaskHandle, runnable: bool) {
+    pub fn set_runnable(&mut self, task: &Arc<Task>, runnable: bool) {
         // O(n) complexity over number of tasks in the queue.
         self.schedulable
-            .retain(|x| x.info.lock().task_id != id.into());
+            .retain(|x| x.info.lock().task_id != task.info.lock().task_id);
 
         if runnable {
-            let task = self
-                .tasks
-                .get_mut(&usize::from(id))
-                .expect("Task with issued handle must exist");
-
             task.info.lock().flags.0 = 0x1;
             self.schedulable.push(task.clone())
         } else {
-            let mut task = self
-                .tasks
-                .get_mut(&usize::from(id))
-                .expect("Task with issued handle must exist");
             task.info.lock().flags.0 = 0x0;
         }
     }
 
-    pub fn next(&mut self) -> Option<TaskHandle> {
+    pub fn next(&mut self) -> Option<Arc<Task>> {
         let next = self.schedulable.pop()?;
-        let id = next.info.lock().task_id;
-        Some(TaskHandle(id))
+        Some(next.clone())
     }
 
-    pub fn new_task(&mut self) -> TaskHandle {
-        let current_task = self
-            .tasks
-            .get(&current_task().0)
-            .expect("New task creation attempted before boot task initialization.");
+    pub fn new_task(&mut self) -> Arc<Task> {
+        let current_task = self.current_task();
         let mut kernel_stack = unsafe {
             let layout = Layout::new::<Task>();
             let ptr = alloc(layout) as *mut Task;
@@ -158,13 +116,13 @@ impl TaskList {
                 .copy_from_slice(&(_task_entry as usize).to_le_bytes());
             Box::from_raw(ptr)
         };
-        let id = self.create_task(kernel_stack);
+        let id = self.insert_task(kernel_stack);
         let kernel_stack = self
             .tasks
             .get_mut(&id)
             .expect("Newly created Task must exist!");
         self.schedulable.push(kernel_stack.clone());
-        TaskHandle(id)
+        kernel_stack.clone()
     }
 
     pub fn init_idle_task(&mut self) {
@@ -200,14 +158,14 @@ impl TaskList {
             total_runtime: 0,
             flags: TaskFlags(0x1),
         });
-        let id = self.create_task(idle_task_stack);
+        let id = self.insert_task(idle_task_stack);
     }
 
     pub fn len(&self) -> usize {
         self.tasks.len()
     }
 
-    fn create_task(&mut self, mut kernel_stack: Box<Task>) -> usize {
+    fn insert_task(&mut self, mut kernel_stack: Box<Task>) -> usize {
         let id = self.next_task_id;
         kernel_stack.info.lock().task_id = self.next_task_id;
         unsafe {
@@ -222,6 +180,26 @@ impl TaskList {
         self.next_task_id += 1;
         id
     }
+
+    pub(crate) fn current_task(&self) -> Arc<Task> {
+        // SAFETY: When a Task is created, its Task struct is placed at the bottom of the 8192 byte
+        //         kernel stack, or the top of the 8192 contiguous bytes of memory allocated.
+        //         Once created it is never moved or deallocated until the Task ends. Therefore, it is
+        //         safe to mask %rsp to get the top of the 8192 byte region of memory that it points to
+        //         and use that as the address of the Task struct.
+        let task = unsafe {
+            let rsp: usize;
+            asm!("mov {}, rsp", out(reg) rsp);
+            let task = rsp & TASK_STRUCT_MASK;
+            let task = task as *const Task;
+            &*task
+        };
+        let id = task.info.lock().task_id;
+        self.tasks
+            .get(&id)
+            .expect("Current task must exist")
+            .clone()
+    }
 }
 #[repr(C)]
 pub(crate) struct TaskInfo {
@@ -231,21 +209,6 @@ pub(crate) struct TaskInfo {
     run_until: u64,
     total_runtime: u64,
     pub(crate) flags: TaskFlags,
-}
-
-#[derive(Copy, Clone)]
-pub struct TaskHandle(usize);
-
-impl fmt::Display for TaskHandle {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<TaskHandle> for usize {
-    fn from(value: TaskHandle) -> Self {
-        value.0
-    }
 }
 
 /// Kernel context registers for saving when context switching.
@@ -265,6 +228,16 @@ struct Registers {
 pub(crate) struct Task {
     info: WithSpinLock<TaskInfo>,
     stack: [u8; (KERNEL_STACK_SIZE - size_of::<TaskInfo>())],
+}
+
+impl Task {
+    pub fn get_run_until(&self) -> u64 {
+        self.info.lock().run_until
+    }
+
+    pub unsafe fn get_info_ptr(&self) -> *const TaskInfo {
+        &*self.info.lock() as *const TaskInfo
+    }
 }
 
 impl PartialEq for Task {
@@ -297,6 +270,12 @@ impl Ord for Task {
     }
 }
 
+impl fmt::Display for Task {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.info.lock().task_id)
+    }
+}
+
 #[repr(C)]
 #[derive(Debug)]
 pub(crate) struct TaskFlags(u32);
@@ -324,20 +303,4 @@ unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGu
 
     // Actual code that the task starts running
     some_task();
-}
-
-pub(crate) fn current_task() -> TaskHandle {
-    // SAFETY: When a Task is created, its Task struct is placed at the bottom of the 8192 byte
-    //         kernel stack, or the top of the 8192 contiguous bytes of memory allocated.
-    //         Once created it is never moved or deallocated until the Task ends. Therefore, it is
-    //         safe to mask %rsp to get the top of the 8192 byte region of memory that it points to
-    //         and use that as the address of the Task struct.
-    let task = unsafe {
-        let rsp: usize;
-        asm!("mov {}, rsp", out(reg) rsp);
-        let task = rsp & TASK_STRUCT_MASK;
-        let task = task as *const Task;
-        &*task
-    };
-    TaskHandle(task.info.lock().task_id)
 }

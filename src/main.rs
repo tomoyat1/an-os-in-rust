@@ -85,7 +85,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     }
     {
         let mut scheduler = sched::lock();
-        scheduler.new_task();
+        let mytask = scheduler.new_task();
     }
     {
         let mut scheduler = sched::lock();
@@ -95,11 +95,11 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Start kernel main loop, where we handle queued data from interrupts.
     loop {
         sleep(1000);
-        let current = sched::current_task();
+        let scheduler = sched::lock();
+        let current = scheduler.current_task();
         writeln!(serial::Handle::new(), "Yo! from kernel main loop",);
 
         // Were done handling all unprocessed inputs/outputs. Switch to another task.
-        let scheduler = sched::lock();
         scheduler.switch()
     }
 }
@@ -108,9 +108,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 /// This is a placeholder for actual code that a newly created task would run.
 pub unsafe extern "C" fn some_task() {
     loop {
-        let current = sched::current_task();
-        writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
         let mut scheduler = sched::lock();
+        let current = scheduler.current_task();
+        writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
         scheduler.sleep(1000)
     }
 }
