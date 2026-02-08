@@ -56,7 +56,6 @@ page_fault_isr:
 
 .global ps2_keyboard_isr
 ps2_keyboard_isr:
-    cli
     pushq $0x21 /* vector: u64,  88(%rsp) */
     pusha
     cld
@@ -65,7 +64,6 @@ ps2_keyboard_isr:
 
 .global pit_isr
 pit_isr:
-    cli
     pushq $0x20 /* vector: u64,  88(%rsp) */
     pusha
     cld
@@ -75,7 +73,6 @@ pit_isr:
 
 .global com0_isr
 com0_isr:
-    cli
     pushq $0x24 /* vector: u64,  88(%rsp) */
     pusha
     cld
@@ -84,7 +81,6 @@ com0_isr:
 
 .global hpet_isr
 hpet_isr:
-    cli
     pushq $0x20 /* vector: u64,  88(%rsp) */
     pusha
     cld
@@ -105,7 +101,6 @@ gen_device_isrs to=63
 .fill 128, 1, 0xcc /* To ensure near jump is used */
 
 device_isr_common:
-    cli
     pusha
     cld
     mov 88(%rsp), %rdi
@@ -117,7 +112,6 @@ isr_exit:
     call check_runtime
     popa
     addq $8, %rsp /* pop vector */
-    sti
     iretq
 
 
