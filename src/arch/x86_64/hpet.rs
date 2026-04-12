@@ -188,8 +188,8 @@ pub fn init(hpet: acpi::HPET) -> &'static (dyn ClockSource + Sync + Send) {
     assert_ne!(timer_0_routing_cap >> 2 & 0x1, 0);
     let mut timer_0_config = hpet.get_timer_config(0);
 
-    // Route interrupts to ISA line 5.
-    timer_0_config |= (0x5 << 9);
+    // Route interrupts to ISA line 2.
+    timer_0_config |= (0x2 << 9);
 
     // Periodic mode
     // Panic if the timer doesn't support periodic mode.
