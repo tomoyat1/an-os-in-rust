@@ -27,5 +27,4 @@ _do_switch:
 _task_entry:
     movq %rbp, %rdi
     movq %rax, %rsi
-    sti
     call task_entry

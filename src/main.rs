@@ -94,9 +94,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 
     // Start kernel main loop, where we handle queued data from interrupts.
     loop {
-        sleep(1000);
         let current = sched::current_task();
         writeln!(serial::Handle::new(), "Yo! from kernel main loop",);
+        sleep(1000);
 
         // Were done handling all unprocessed inputs/outputs. Switch to another task.
         let scheduler = sched::lock();
@@ -110,8 +110,6 @@ pub unsafe extern "C" fn some_task() {
     loop {
         let current = sched::current_task();
         writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
-        let mut scheduler = sched::lock();
-        scheduler.sleep(1000)
     }
 }
 

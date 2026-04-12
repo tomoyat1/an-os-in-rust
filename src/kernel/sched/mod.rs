@@ -64,6 +64,14 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
                         as *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>,
                 );
             ManuallyDrop::drop(&mut scheduler);
+
+            // Ensure we enable interrupts after dropping the lock on the scheduler.
+            // If task A had voluntarily `scheduler.switch()`ed to task B then task B was preempted
+            // in favor of task A, task A would not have an `iret` in the kernel exit path and
+            // interrupts will remain disabled. The following is a special exception to ensure
+            // interrupts are enabled, until the change is made so that voluntary switches are done
+            // through software interrupts.
+            asm!("sti")
         };
     }
 
