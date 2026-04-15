@@ -295,6 +295,7 @@ pub(crate) struct Task {
 }
 
 #[derive(Copy, Clone, Debug)]
+#[repr(C)]
 pub(crate) struct TaskFlags(u32);
 
 impl TaskFlags {
