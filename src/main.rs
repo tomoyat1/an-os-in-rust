@@ -100,7 +100,11 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         sleep(1000);
 
         // Were done handling all unprocessed inputs/outputs. Switch to another task.
-        asm!("mov eax, 24", "int 0x80", out("rax") _);
+        asm!(
+            "mov rax, 0x18",
+            "int 0x80",
+            out("rax") _,
+        );
     }
 }
 
@@ -110,6 +114,16 @@ pub unsafe extern "C" fn some_task() {
     loop {
         let current = sched::current_task();
         writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
+
+        // Sleep for 1000 ms with nanosleep:
+        asm!(
+            "mov rax, 0x23",
+            "mov rdi, {arg0:r}",
+            "int 0x80",
+            out("rax") _,
+            out("rdi") _,
+            arg0 = in(reg) 1_000_000_000,
+        );
     }
 }
 

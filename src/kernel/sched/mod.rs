@@ -74,7 +74,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
         t
     }
 
-    pub(crate) fn sleep(mut self, ms: u64) {
+    pub(crate) fn sleep(mut self, ns: u64) {
         let clock = unsafe {
             clock::CLOCK
                 .get()
@@ -84,7 +84,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
         if let Some(clock) = clock {
             let (start, until) = {
                 let start = clock.get_tick();
-                let until = start + ms * 1_000_000;
+                let until = start + ns;
                 (start, until)
             };
             let current_task = {

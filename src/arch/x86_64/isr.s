@@ -91,8 +91,13 @@ hpet_isr:
 syscall_isr:
     pushq $0x80 /* vector: u64,  88(%rsp) */
     pusha
+    movq 80(%rsp), %rdi /* syscall_number */
+    movq 56(%rsp), %rsi /* %rdi: arg0 */
+    movq 48(%rsp), %rdx /* %rsi: arg1 */
+    movq 64(%rsp), %rcx /* %rdx: arg2 */
+    movq 8(%rsp),  %r8  /* %r10: arg3 */
+    movq 24(%rsp), %r9  /* %r8: arg4 */
     cld
-    mov %rax, %rdi
     call syscall_handler
     jmp isr_exit
 

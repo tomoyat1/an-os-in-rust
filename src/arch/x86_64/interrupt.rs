@@ -1,5 +1,6 @@
 use alloc::vec;
 use core::arch::asm;
+use core::ffi::c_void;
 use core::ptr::{read_volatile, write_volatile};
 
 use super::{hpet, pit};
@@ -207,7 +208,14 @@ unsafe extern "C" fn hpet_handler() {
 }
 
 #[no_mangle]
-unsafe extern "C" fn syscall_handler(syscall_number: u64) {
+unsafe extern "C" fn syscall_handler(
+    syscall_number: u64,
+    arg0: *const c_void,
+    arg1: *const c_void,
+    arg2: *const c_void,
+    arg3: *const c_void,
+    arg4: *const c_void,
+) {
     {
         let mut lapic = LOCAL_APIC.lock();
         lapic.write(0xb0, 0);
@@ -216,6 +224,11 @@ unsafe extern "C" fn syscall_handler(syscall_number: u64) {
         Ok(SYSCALL::SchedYield) => {
             let scheduler = sched::lock();
             scheduler.switch()
+        }
+        Ok(SYSCALL::Nanosleep) => {
+            let scheduler = sched::lock();
+            let ns = arg0 as u64;
+            scheduler.sleep(ns)
         }
         Err(syscall::Unknown(v)) => {
             panic!("Invalid syscall: {:}", v)
