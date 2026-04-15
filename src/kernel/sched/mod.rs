@@ -1,18 +1,13 @@
 use crate::arch::x86_64::hpet;
 use crate::kernel::clock;
-use crate::kernel::sched::task::{TaskInfo, TaskList};
+use crate::kernel::sched::task::TaskList;
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
-use crate::panic;
 
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 
-use core::arch::asm;
 use core::ffi::c_void;
 use core::mem::ManuallyDrop;
-use core::ops::Deref;
-use core::sync::atomic::Ordering::Relaxed;
-use core::{mem, ptr};
+use core::ptr;
 
 mod task;
 pub(crate) use task::current_task;

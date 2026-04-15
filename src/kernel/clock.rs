@@ -9,7 +9,6 @@ use core::ops::Bound::Included;
 use core::sync::atomic::AtomicU64;
 use core::sync::atomic::Ordering::Relaxed;
 
-use crate::arch::x86_64::pit;
 use crate::kernel::clocksource::ClockSource;
 
 pub static CLOCK: SyncUnsafeCell<Option<Clock>> = SyncUnsafeCell::new(None);
@@ -55,7 +54,7 @@ impl Clock {
         now
     }
 
-    /// Schedule a FnOnce to run at or after the given time, in nanoseconds.
+    /// Schedule an FnOnce to run at or after the given time, in nanoseconds.
     pub fn callback_at(&mut self, ns: u64, f: Box<dyn FnOnce(u64) + Sync>) {
         let existing = self.callbacks.get(&ns);
         self.callbacks.insert(ns, f);

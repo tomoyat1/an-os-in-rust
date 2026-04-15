@@ -10,10 +10,9 @@ use alloc::collections::{BTreeMap, BinaryHeap};
 use core::alloc::Layout;
 use core::arch::asm;
 use core::cmp::Ordering;
-use core::fmt::{Formatter, Write};
+use core::fmt::Formatter;
 use core::mem::{size_of, ManuallyDrop};
-use core::ops::DerefMut;
-use core::{fmt, mem, ptr};
+use core::{fmt, ptr};
 
 pub const KERNEL_STACK_SIZE: usize = 0x2000;
 const TASK_STRUCT_MASK: usize = (KERNEL_STACK_SIZE - 1) ^ 0xffff_ffff_ffff_ffff;
