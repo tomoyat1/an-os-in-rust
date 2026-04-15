@@ -321,9 +321,7 @@ unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGu
     // Ensure we enable interrupts after dropping the lock on the scheduler.
     // The new task does not have an `iret` in the kernel exit path, so
     // interrupts will remain disabled. The following is a special exception to ensure
-    // interrupts are enabled, until the change is made so that voluntary switches are done
-    // through software interrupts. task_entry() should contain a software interrupt that gives up
-    // the CPU so that when it is resumed interrupts are re-enabled.
+    // interrupts are enabled.
     asm!("sti");
 
     // Actual code that the task starts running

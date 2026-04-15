@@ -4,7 +4,12 @@ use core::ptr::{read_volatile, write_volatile};
 
 use super::{hpet, pit};
 use crate::drivers::{acpi, serial};
+use crate::kernel::sched;
+use crate::kernel::sched::Scheduler;
 use crate::locking::spinlock::WithSpinLock;
+
+use crate::arch::x86_64::syscall;
+use crate::arch::x86_64::syscall::SYSCALL;
 
 extern "C" {
     fn page_fault_isr();
@@ -12,6 +17,7 @@ extern "C" {
     fn ps2_keyboard_isr();
     fn pit_isr();
     fn hpet_isr();
+    fn syscall_isr();
     fn com0_isr();
     fn reload_idt(idtr: *const IDTR);
 }
@@ -24,7 +30,7 @@ pub static IOAPIC: WithSpinLock<IOAPIC> = WithSpinLock::new(IOAPIC::new(0));
 
 pub static LOCAL_APIC: WithSpinLock<LocalAPIC> = WithSpinLock::new(LocalAPIC::new(0));
 
-static IDT: WithSpinLock<[u128; 40]> = WithSpinLock::new([0; 40]);
+static IDT: WithSpinLock<[u128; 256]> = WithSpinLock::new([0; 256]);
 
 // TODO: lock this properly
 static mut IRQ_HANDLERS: [usize; 128] = [0; 128];
@@ -109,6 +115,19 @@ pub fn init(madt: &acpi::MADT) -> u32 {
         idt[0x20] = descriptor;
     }
 
+    // syscall handler
+    {
+        let mut descriptor: u128 = 0;
+        let handler = syscall_isr as usize;
+        descriptor |= (handler & 0xffff) as u128; // offset 15:0
+        descriptor |= ((handler & 0xffffffffffff0000) as u128) << 32; // offset 63:16
+        descriptor |= 0x8 << 16; // segment selector
+        descriptor |= 0xe << 40; // type: 0b1110
+        descriptor |= 8 << 44; // Present flag
+
+        idt[0x80] = descriptor;
+    }
+
     // Interrupt 0x26
     // TODO: set up for all interrupts in 0x20-0x7f inclusive.
     {
@@ -125,7 +144,7 @@ pub fn init(madt: &acpi::MADT) -> u32 {
 
     // Set IDTR
     let idtr = IDTR {
-        limit: 40 * 16 - 1,
+        limit: 256 * 16 - 1,
         base: idt.as_ptr() as usize,
     };
     unsafe {
@@ -133,7 +152,7 @@ pub fn init(madt: &acpi::MADT) -> u32 {
     }
 
     // The following assumes the runtime environment is APIC based.
-    // Behaviour is undefined on systems without APIC.
+    // Behavior is undefined on systems without APIC.
     mask_pic();
     let lapic = LocalAPIC::new(madt.lapic_addr);
     let ioapic = IOAPIC::new(madt.ioapic_addr);
@@ -185,6 +204,23 @@ unsafe extern "C" fn hpet_handler() {
     hpet::hpet_tick();
     let mut lapic = LOCAL_APIC.lock();
     lapic.write(0xb0, 0)
+}
+
+#[no_mangle]
+unsafe extern "C" fn syscall_handler(syscall_number: u64) {
+    {
+        let mut lapic = LOCAL_APIC.lock();
+        lapic.write(0xb0, 0);
+    }
+    match SYSCALL::try_from(syscall_number) {
+        Ok(SYSCALL::SchedYield) => {
+            let scheduler = sched::lock();
+            scheduler.switch()
+        }
+        Err(syscall::Unknown(v)) => {
+            panic!("Invalid syscall: {:}", v)
+        }
+    }
 }
 
 #[no_mangle]

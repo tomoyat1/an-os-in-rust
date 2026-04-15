@@ -10,6 +10,7 @@ extern crate alloc;
 extern crate bootlib;
 extern crate rlibc;
 
+use core::arch::asm;
 use core::fmt::{Debug, Write};
 use core::panic::PanicInfo;
 
@@ -95,12 +96,11 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Start kernel main loop, where we handle queued data from interrupts.
     loop {
         let current = sched::current_task();
-        writeln!(serial::Handle::new(), "Yo! from kernel main loop",);
+        writeln!(serial::Handle::new(), "Yo! from kernel main loop");
         sleep(1000);
 
         // Were done handling all unprocessed inputs/outputs. Switch to another task.
-        let scheduler = sched::lock();
-        scheduler.switch()
+        asm!("mov eax, 24", "int 0x80", out("rax") _);
     }
 }
 

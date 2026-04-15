@@ -87,6 +87,15 @@ hpet_isr:
     call hpet_handler
     jmp isr_exit
 
+.global syscall_isr
+syscall_isr:
+    pushq $0x80 /* vector: u64,  88(%rsp) */
+    pusha
+    cld
+    mov %rax, %rdi
+    call syscall_handler
+    jmp isr_exit
+
 .macro gen_device_isrs from=0, to
     pushq $\from /* vector: u64,  88(%rsp) */
     jmp device_isr_common

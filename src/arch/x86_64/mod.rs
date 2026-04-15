@@ -4,3 +4,4 @@ pub mod mm;
 pub mod pit;
 pub mod pm;
 pub mod port;
+pub mod syscall;
