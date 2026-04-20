@@ -113,7 +113,11 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 pub unsafe extern "C" fn some_task() {
     loop {
         let current = sched::current_task();
-        writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
+        writeln!(
+            serial::Handle::new(),
+            "Yo! from some task: {:}",
+            current.get_handle()
+        );
 
         // Sleep for 1000 ms with nanosleep:
         asm!(

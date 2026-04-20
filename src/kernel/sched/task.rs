@@ -49,11 +49,11 @@ impl TaskList {
         Some(TaskHandle(id))
     }
 
-    pub fn set_current_task(&mut self, id: usize, now: u64) {
-        self.current = Some(id);
+    pub fn set_current_task(&mut self, id: TaskHandle, now: u64) {
+        self.current = Some(id.0);
         let mut task = self
             .tasks
-            .get_mut(&id)
+            .get_mut(&id.0)
             .expect("The task set as current must exist");
         task.info.last_scheduled = now;
     }
@@ -75,11 +75,11 @@ impl TaskList {
 
     // TODO: ensure at type level that this is only called on a running task, and not on a runnable
     //       or blocked one.
-    pub fn update_runtime(&mut self, id: TaskHandle, timestamp: u64) {
+    pub fn update_runtime(&mut self, task: &Task, timestamp: u64) {
         let task_count = self.tasks.len();
         let task = self
             .tasks
-            .get_mut(&id.0)
+            .get_mut(&task.info.task_id)
             .expect("Task must exist for handle!");
         let delta = timestamp - task.info.last_scheduled;
         let delta = delta * task_count as u64;
@@ -293,6 +293,16 @@ pub(crate) struct Task {
     stack: [u8; (KERNEL_STACK_SIZE - size_of::<TaskInfo>())],
 }
 
+impl Task {
+    pub(crate) fn get_handle(&self) -> TaskHandle {
+        TaskHandle(self.info.task_id)
+    }
+
+    pub(crate) fn get_run_until(&self) -> u64 {
+        self.info.run_until
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
 pub(crate) struct TaskFlags(u32);
@@ -328,11 +338,11 @@ unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGu
     some_task();
 }
 
-pub(crate) fn current_task() -> TaskHandle {
-    // SAFETY: When a Task is created, its Task struct is placed at the bottom of the 8192 byte
+pub(crate) fn current_task<'a>() -> &'a Task {
+    // SAFETY: When a Task is created, its Task struct is placed at the bottom of the 8192-byte
     //         kernel stack, or the top of the 8192 contiguous bytes of memory allocated.
-    //         Once created it is never moved or deallocated until the Task ends. Therefore, it is
-    //         safe to mask %rsp to get the top of the 8192 byte region of memory that it points to
+    //         Once created, it is never moved or deallocated until the Task ends. Therefore, it is
+    //         safe to mask %rsp to get the top of the 8192-byte region of memory that it points to
     //         and use that as the address of the Task struct.
     let task = unsafe {
         let rsp: usize;
@@ -341,5 +351,5 @@ pub(crate) fn current_task() -> TaskHandle {
         let task = task as *const Task;
         &*task
     };
-    TaskHandle(task.info.task_id)
+    task
 }

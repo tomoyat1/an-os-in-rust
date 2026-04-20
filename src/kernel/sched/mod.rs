@@ -36,7 +36,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
         // TODO: abstract clocksources and get time from the trait object.
         let now = hpet::get_time();
 
-        let mut switch_from = self.task_list.current_task().unwrap();
+        let switch_from = current_task();
 
         self.task_list.update_runtime(switch_from, now);
 
@@ -45,10 +45,10 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
             .task_list
             .next()
             .unwrap_or(self.task_list.get(0).expect("Kernel task 0 must exist."));
-        self.task_list.set_current_task(switch_to.into(), now);
+        self.task_list.set_current_task(switch_to, now);
         self.task_list.set_run_until(switch_to, now);
 
-        let switch_from = self.task_list.get_ptr(switch_from);
+        let switch_from = self.task_list.get_ptr(switch_from.get_handle());
         let switch_to = self.task_list.get_ptr(switch_to);
 
         let mut scheduler = ManuallyDrop::new(self);
@@ -64,14 +64,6 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
 
     pub(crate) fn new_task(&mut self) -> task::TaskHandle {
         self.task_list.new_task()
-    }
-
-    pub(crate) fn current_task(&self) -> task::TaskHandle {
-        let t = self
-            .task_list
-            .current_task()
-            .expect("No tasks found. Maybe this is called before boot task initialization?");
-        t
     }
 
     pub(crate) fn sleep(mut self, ns: u64) {
@@ -124,9 +116,8 @@ pub(crate) fn lock() -> WithSpinLockGuard<'static, Scheduler> {
 #[unsafe(no_mangle)]
 extern "C" fn check_runtime() {
     let now = hpet::get_time();
-    let mut handle = SCHEDULER.lock();
-    let current = handle.current_task();
-    if handle.task_list.get_run_until(current) <= now {
-        handle.switch()
+    let mut scheduler = SCHEDULER.lock();
+    if current_task().get_run_until() <= now {
+        scheduler.switch()
     }
 }
