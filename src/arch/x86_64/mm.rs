@@ -104,3 +104,59 @@ pub fn phys_addr(linear_addr: *const u8) -> *const u8 {
         0 as *const u8
     }
 }
+
+/// Present; when 0, the entry is ignored
+const PRESENT_FLAG: usize = 1;
+
+/// Read/write; if 0, writes are not allowed to the region that the entry controls.
+const RW_FLAG: usize = 1 << 1;
+
+/// User/supervisor; if 0, user-mode accesses are not allowed to the region that the entry controls.
+const US_FLAG: usize = 1 << 2;
+
+/// Page-level write-through
+const PWT_FLAG: usize = 1 << 3;
+
+/// Page-level cache disable
+const PCD_FLAG: usize = 1 << 4;
+
+/// Accessed; when 1, the entry has been used for linear address translation.
+const ACCESSED_FLAG: usize = 1 << 5;
+
+/// Dirty; when 1, the region that the entry controls has been written to.
+const DIRTY_FLAG: usize = 1 << 6;
+
+/// Page size; when 1, the entry directly maps memory. When 0, the entry references a subordinate paging structure.
+const PS_FLAG: usize = 1 << 7;
+
+/// Global; determines whether the translation is global.
+const GLOBAL_FLAG: usize = 1 << 8;
+
+/// Page attribute table; determines the memory thpe used to access the region that the entry controls.
+const PAT_FLAG: usize = 1 << 12;
+
+/// A paging structure entry.
+#[repr(C)]
+struct PageEntry {
+    bytes: usize
+}
+
+impl PageEntry {
+    const fn new(flags: usize, phys_addr: usize) -> Self {
+        PageEntry {
+            bytes: flags | (phys_addr & MASK_51_12),
+        }
+    }
+
+    fn get_flags(&self, flag: usize) -> usize {
+        self.bytes & flag
+    }
+
+    fn set_flags(&mut self, flag: usize, value: bool) {
+        if value {
+            self.bytes |= flag;
+        } else {
+            self.bytes &= !flag;
+        }
+    }
+}
