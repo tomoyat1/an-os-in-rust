@@ -25,6 +25,8 @@ use uefi::table::cfg::ACPI2_GUID;
 
 static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
 
+const KERNEL_BASE: usize = 0xffff800000000000;
+
 #[entry]
 fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     // Initialize logging.
@@ -87,7 +89,6 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         unsafe { system_table.exit_boot_services(MemoryType::LOADER_DATA) };
 
     // Pass virtual memory mappings to UEFI for relocation of runtime services.
-    let mut head: u64 = 0xffffffff80000000;
     mmap_iter.sort();
     for entry in mmap_iter.entries() {
         let mut ve = MemoryDescriptor::default();
@@ -95,8 +96,7 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         ve.phys_start = entry.phys_start;
         ve.page_count = entry.page_count;
         ve.att = entry.att;
-        head -= ve.page_count * 0x1000;
-        ve.virt_start = head;
+        ve.virt_start = entry.phys_start; // We do not remap memory in the bootloader, so keep identity map.
         virt_mmap.push(ve);
     }
 

@@ -14,7 +14,7 @@ extern "C" {
     static mut BOOT_PDPT: [u64; 512];
 }
 
-pub const KERNEL_BASE: usize = 0xffffffff80000000;
+pub const KERNEL_BASE: usize = 0xffff800000000000;
 
 const MASK_51_12: usize = 0x000ffffffffff000;
 const MASK_51_30: usize = 0x000ffffffc0000000;
@@ -138,7 +138,7 @@ const PAT_FLAG: usize = 1 << 12;
 /// A paging structure entry.
 #[repr(C)]
 struct PageEntry {
-    bytes: usize
+    bytes: usize,
 }
 
 impl PageEntry {
