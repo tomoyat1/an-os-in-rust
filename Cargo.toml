@@ -13,13 +13,11 @@ path = "src/main.rs"
 rlibc = "1.0"
 uefi = "=0.29.0"
 bootlib = { path = "./bootlib" }
+paging = { path = "./paging" }
 spin = "0.10.0"
 
 [workspace]
-members = [
-    "bootloader",
-    "bootlib",
-]
+members = ["bootloader", "bootlib", "paging"]
 
 [profile.dev]
 debug = true
