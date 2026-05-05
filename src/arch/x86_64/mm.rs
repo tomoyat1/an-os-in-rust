@@ -56,7 +56,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
             | MemoryType::BOOT_SERVICES_DATA
             | MemoryType::CONVENTIONAL => {
                 // TODO: exclude range of boot page tables
-                if let Some(block) = exclude_ranges(mdesc, &[0..1 << 30]) {
+                if let Some(block) = exclude_ranges(mdesc, &[0..0x800000]) {
                     free_blocks.push(block)
                 }
             }
@@ -153,13 +153,21 @@ fn exclude_range(
             let shift = range.end - start;
             let start = range.end;
             let length = length - shift;
-            Some((start, length))
+            if length == 0 {
+                None
+            } else {
+                Some((start, length))
+            }
         }
         (false, true) => {
             let shift = (start + length) - range.start;
             let start = start;
             let length = length - shift;
-            Some((start, length))
+            if length == 0 {
+                None
+            } else {
+                Some((start, length))
+            }
         }
         _ => Some((start, length)),
     };

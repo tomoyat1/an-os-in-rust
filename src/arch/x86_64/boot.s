@@ -1,38 +1,35 @@
 .code32
-.section .bss, "aw", @nobits
-.align 4096
+.section .boot_paging_structures, "aw", @nobits
+.global boot_paging_structures_start
+boot_paging_structures_start:
 .global boot_pml4
 boot_pml4:
     .skip 0x1000
 .global boot_pdpt
 boot_pdpt:
     .skip 0x1000
-boot_idmap_pdpt:
-    .skip 0x1000
-boot_heap_pdpt:
-    .skip 0x1000
 .global boot_pdt
 boot_pdt:
     .skip 0x1000
-boot_idmap_pdt:
+boot_idmap_pdpt:
     .skip 0x1000
-boot_heap_pdt:
+boot_idmap_pdt:
     .skip 0x1000
 .global boot_pt
 boot_pt:
     .skip 0x1000
+.global boot_paging_structures_end
+boot_paging_structures_end:
 
-# This is unused, and at the wrong address.
-# This cannot be static H/W memory mapping depends on the machine we run on.
-.global heap_bottom
-heap_bottom:
-
+.align 0x1000
 .section .bootstrap_stack, "aw", @nobits
 .global boot_stack_top
 boot_stack_top:
     .skip 0x2000
 .global boot_stack_bottom
 boot_stack_bottom:
+
+.section .bss, "aw", @nobits
 
 .code64
 .section .low.text, "ax"
@@ -42,7 +39,7 @@ boot_stack_bottom:
 _low_start:
     mov %rcx, %rdi
     cli
-    # identity-map 0x100000
+    # identity-map [0x0, 0x1FFFFF]
     # pml4
     movabsq $(boot_pml4 - KERNEL_BASE), %r8
     movabsq $(boot_idmap_pdpt - KERNEL_BASE), %r9
@@ -70,10 +67,11 @@ _low_start:
 
     # Identity-map 0xBE4D0000
     # This is for numerous things, such as UEFI allocated heap and ACPI tables.
+    # TODO: Map this in Rust code, at offset PML4[510]
     # pml4
     movabsq $(boot_pml4 - KERNEL_BASE), %r8 # base of pml4
     movabsq $(boot_idmap_pdpt - KERNEL_BASE), %r9 # phys addr of pdpt; do not reuse pdpt because boot heap is in
-                                               # another 512GiB region than higher-half kernel.
+                                                  # another 512GiB region than higher-half kernel.
     movabsq $0x0000FFFFFFFFF000, %r12 # mask for bits 47:12
     andq %r12, %r9
     orq $0x0000000000000003, %r9
@@ -100,10 +98,11 @@ _low_start:
 
     # Identity-map 0xC0000000
     # This is for numerous things, such as UEFI allocated heap and ACPI tables.
+    # TODO: Map this in Rust code, at offset 0xffff_ff00_0000_0000 (PML4[510])
     # pml4
     movabsq $(boot_pml4 - KERNEL_BASE), %r8 # base of pml4
     movabsq $(boot_idmap_pdpt - KERNEL_BASE), %r9 # phys addr of pdpt; do not reuse pdpt because boot heap is in
-                                                  # another 512GiB region than higher-half kernel.
+                                                # another 512GiB region than higher-half kernel.
     movq $0x0000FFFFFFFFF000, %r12 # mask for bits 47:12
     andq %r12, %r9
     orq $0x0000000000000003, %r9
@@ -126,10 +125,9 @@ _low_start:
     shrq $27, %r11 # bits 38:30 of linear address are bits 11:3 of pdpte
     addq %r11, %r8 # add offset into pdt to pdpt base addr
     movq %r9, 0(%r8)
-    # end identity-map 0xBE4D0000
+    # end identity-map 0xC0000000
 
-    # Map bottom 1 GB of physical memory to KERNEL_BASE
-    # The remaining 1 GiB will be handled in rust code.
+    # Map bottom 6 MiB of physical memory to KERNEL_BASE
     movabsq $(boot_pml4 - KERNEL_BASE), %r8
     movabsq $(boot_pdpt - KERNEL_BASE), %r9
     mov $0x0000FFFFFFFFF000, %r12
@@ -138,22 +136,77 @@ _low_start:
     movq $KERNEL_BASE, %r11
     movq $0x0000FF8000000000, %rcx #  mask for 47:39
     andq %rcx, %r11
-    shrq $36, %r11 # bits 47:39 of linear address are bits 11:3 of pdpte
+    shrq $36, %r11 # bits 47:39 of linear address are bits 11:3 of pml4e address (offset)
     addq %r11, %r8
     movq %r9, 0(%r8) # offset in pml4 are determined from bits 47:39 in linear address, which is in %r11 mask: 0000FF8000000000
 
     movabsq $(boot_pdpt - KERNEL_BASE), %r8
+    movabsq $(boot_pdt - KERNEL_BASE), %r9
+    mov $0x0000FFFFFFFFF000, %r12 # mask for 47:12
+    andq %r12, %r9
+    orq $0x0000000000000003, %r9
+    movq $KERNEL_BASE, %r11
+    movq $0x0000007FC0000000, %rcx #  mask for 38:30
+    andq %rcx, %r11
+    shrq $27, %r11 # bits 38:30 of linear address are bits 11:3 of pdpte
+    addq %r11, %r8
+    movq %r9, 0(%r8) # offset in pdpt are determined from bits 38:30 in linear address
+
+    movabsq $(boot_pdt - KERNEL_BASE), %r8
     xorq %r9, %r9 # 0 page of phys memory
-    movq $0x00000FFFC0000000, %r12 # mask for 47:30
+    movq $0x0000FFFFFFE00000, %r12 # mask for 47:21
     andq %r12, %r9
     movq $0x0000000000000083, %rdx
     orq %rdx, %r9
     movq $KERNEL_BASE, %r11
-    movq $0x0000007FC0000000, %rcx #  mask for 38:30
+    movq $0x000000003FE00000, %rcx #  mask for 29:21
     andq %rcx, %r11
-    shrq $27, %r11 # bits 38:30 of linear address are bits 11:3 of pte
+    shrq $18, %r11 # bits 29:20 of linear address are bits 11:3 of pde
     addq %r11, %r8
-    movq %r9, 0(%r8) # offset in pml4 are determined from bits 38:30 in linear address, which is in %r11 mask: 0000FF8000000000
+    movq %r9, 0(%r8) # offset in pdt are determined from bits 29:21 in linear address
+
+    movabsq $(boot_pdt - KERNEL_BASE), %r8
+    movq $0x0000000000200000, %r9 # 2MiB page at phys 0x200000
+    movq $0x0000FFFFFFE00000, %r12 # mask for 47:21
+    andq %r12, %r9
+    movq $0x0000000000000083, %rdx
+    orq %rdx, %r9
+    movq $KERNEL_BASE, %r11
+    addq $0x200000, %r11 # 2MiB offset
+    movq $0x000000003FE00000, %rcx #  mask for 29:21
+    andq %rcx, %r11
+    shrq $18, %r11 # bits 38:30 of linear address are bits 11:3 of pde
+    addq %r11, %r8
+    movq %r9, 0(%r8) # offset in pdt are determined from bits 29:21 in linear address
+
+    movabsq $(boot_pdt - KERNEL_BASE), %r8
+    movq $0x0000000000400000, %r9 # 2MiB page at phys 0x400000
+    movq $0x0000FFFFFFE00000, %r12 # mask for 47:21
+    andq %r12, %r9
+    movq $0x0000000000000083, %rdx
+    orq %rdx, %r9
+    movq $KERNEL_BASE, %r11
+    addq $0x400000, %r11 # 4MiB offset
+    movq $0x000000003FE00000, %rcx #  mask for 29:21
+    andq %rcx, %r11
+    shrq $18, %r11 # bits 38:30 of linear address are bits 11:3 of pde
+    addq %r11, %r8
+    movq %r9, 0(%r8) # offset in pdt are determined from bits 29:21 in linear address
+
+    # Map next 2 Mib to KERNEL_BASE + 512MiB, for initial heap
+    movabsq $(boot_pdt - KERNEL_BASE), %r8
+    movq $0x0000000000600000, %r9 #  2MiB page at phys 0x600000
+    movq $0x0000FFFFFFE00000, %r12 # mask for 47:21
+    andq %r12, %r9
+    movq $0x0000000000000083, %rdx
+    orq %rdx, %r9
+    movq $KERNEL_BASE, %r11
+    addq $0x20000000, %r11 # 512MiB offset
+    movq $0x000000003FE00000, %rcx #  mask for 29:21
+    andq %rcx, %r11
+    shrq $18, %r11 # bits 29:21 of linear address are bits 11:3 of pde
+    addq %r11, %r8
+    movq %r9, 0(%r8) # offset in pdt are determined from bits 29:21 in linear address
 
     # set cr3 to boot_pml4
     movabsq $(boot_pml4 - KERNEL_BASE), %r11

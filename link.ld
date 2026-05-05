@@ -25,6 +25,8 @@ SECTIONS
 		*(COMMON)
 		. = ALIGN(0x2000);
 		*(.bootstrap_stack)
+		. = ALIGN(0x200000);
+		*(.boot_paging_structures)
 		*(.bss)
 	}
 	_kernel_end = .;
