@@ -19,12 +19,19 @@ extern "C" {
 
     #[link_name = "boot_pdt"]
     static mut BOOT_PDT: [PageEntry; 512];
+
+    #[link_name = "boot_paging_pdpt"]
+    static mut BOOT_PAGING_PDPT: [PageEntry; 512];
+
+    #[link_name = "boot_paging_pdt"]
+    static mut BOOT_PAGING_PDT: [PageEntry; 512];
 }
 
 static PHYSICAL_PAGE_ALLOCATOR: WithSpinLock<physical::PageAllocator> =
     WithSpinLock::new(physical::PageAllocator::new());
 
 pub const KERNEL_BASE: usize = 0xffff800000000000;
+const PAGING_STRUCTURE_BASE: usize = 0xffffff8000000000;
 
 const MASK_51_12: usize = 0x000ffffffffff000;
 const MASK_51_30: usize = 0x000ffffffc0000000;
@@ -40,20 +47,6 @@ const MASK_20_0: usize = 0x00000000001fffff;
 /// init_mm() (re)-initializes paging data structures for kernel execution.
 /// It also sets up paging for the kernel heap located at KERNEL_BASE + 512MiB
 pub fn init_mm(memory_map: &[MemoryDescriptor]) {
-    let kernel_pml4 = unsafe { &raw const KERNEL_PML4 };
-
-    /*
-    TODO: remove this code; we do not map the next 2 GiB anymore.
-    // Map the first 2 GiB of physical memory to the upper 2 GiB.
-    // First GiB is already done, so do the latter 1 GiB.
-    let pdpt_idx: usize = ((KERNEL_BASE + (1 << 30)) & MASK_38_30) >> 30;
-    let pdpte = 1 << 30u64 & MASK_47_30 as u64 | 0x83;
-    unsafe {
-        let boot_pdpt = unsafe { &raw mut BOOT_PDPT[pdpt_idx] };
-        ptr::write_volatile(boot_pdpt, pdpte);
-    }
-    */
-
     let mut free_blocks = Vec::<(usize, usize)>::new();
 
     for mdesc in memory_map {
@@ -74,7 +67,28 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
         PHYSICAL_PAGE_ALLOCATOR.lock().init(&free_blocks);
     }
 
-    // TODO: map boot page tables to offset 0xffff_ff800_0000_0000
+    // Map first 2MiB of paging structures to 0xffff_ff80_0000_0000.
+    let pml4 = unsafe { &raw mut KERNEL_PML4 };
+    let idx = (PAGING_STRUCTURE_BASE & MASK_47_39) >> 39;
+    unsafe {
+        let pdpt = &raw mut BOOT_PAGING_PDPT;
+        let pdpt = pdpt as usize - KERNEL_BASE;
+        (*pml4)[idx] = PageEntry::new(0x3, pdpt)
+    }
+
+    let pdpt = unsafe { &raw mut BOOT_PAGING_PDPT };
+    let idx = (PAGING_STRUCTURE_BASE & MASK_38_30) >> 30;
+    unsafe {
+        let pdt = &raw mut BOOT_PAGING_PDT;
+        let pdt = pdt as usize - KERNEL_BASE;
+        (*pdpt)[idx] = PageEntry::new(0x3, pdt)
+    }
+
+    let pdt = unsafe { &raw mut BOOT_PAGING_PDT };
+    let idx = PAGING_STRUCTURE_BASE & MASK_29_21 >> 21;
+    unsafe { (*pdt)[idx] = PageEntry::new(0x83, 0x200000) }
+
+    flush_tlb();
 
     for mdesc in memory_map {
         // TODO: Map with KERNEL_BASE offset the following

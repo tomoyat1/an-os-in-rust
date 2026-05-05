@@ -1,7 +1,5 @@
 .code32
 .section .boot_paging_structures, "aw", @nobits
-.global boot_paging_structures_start
-boot_paging_structures_start:
 .global boot_pml4
 boot_pml4:
     .skip 0x1000
@@ -15,11 +13,12 @@ boot_idmap_pdpt:
     .skip 0x1000
 boot_idmap_pdt:
     .skip 0x1000
-.global boot_pt
-boot_pt:
+.global boot_paging_pdpt
+boot_paging_pdpt:
     .skip 0x1000
-.global boot_paging_structures_end
-boot_paging_structures_end:
+.global boot_paging_pdt
+boot_paging_pdt:
+    .skip 0x1000
 
 .align 0x1000
 .section .bootstrap_stack, "aw", @nobits
@@ -29,7 +28,10 @@ boot_stack_top:
 .global boot_stack_bottom
 boot_stack_bottom:
 
-.section .bss, "aw", @nobits
+.section .boot_data, "aw", @nobits
+.global boot_data
+boot_data:
+    .skip 0x1000
 
 .code64
 .section .low.text, "ax"
