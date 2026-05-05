@@ -96,7 +96,8 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         ve.phys_start = entry.phys_start;
         ve.page_count = entry.page_count;
         ve.att = entry.att;
-        ve.virt_start = entry.phys_start; // We do not remap memory in the bootloader, so keep identity map.
+        // The kernel will map runtime entries at KERNEL_BASE offset.
+        ve.virt_start = entry.phys_start + KERNEL_BASE as u64;
         virt_mmap.push(ve);
     }
 

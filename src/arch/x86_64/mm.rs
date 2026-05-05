@@ -1,10 +1,14 @@
+use alloc::vec::Vec;
 use core::arch::asm;
+use core::ops;
 use core::ptr;
 use core::slice::from_raw_parts;
 
-use uefi::table::boot;
+use uefi::table::boot::{MemoryDescriptor, MemoryType};
 
+use crate::locking::spinlock::WithSpinLock;
 use crate::mm::malloc;
+use paging::physical;
 
 extern "C" {
     #[link_name = "boot_pml4"]
@@ -13,6 +17,9 @@ extern "C" {
     #[link_name = "boot_pdpt"]
     static mut BOOT_PDPT: [u64; 512];
 }
+
+static PHYSICAL_PAGE_ALLOCATOR: WithSpinLock<physical::PageAllocator> =
+    WithSpinLock::new(physical::PageAllocator::new());
 
 pub const KERNEL_BASE: usize = 0xffff800000000000;
 
@@ -25,12 +32,13 @@ const MASK_38_30: usize = 0x0000007fc0000000;
 const MASK_29_0: usize = 0x000000003fffffff;
 
 /// init_mm() (re)-initializes paging data structures for kernel execution.
-/// This also maps memory required for UEFI runtime services so that memory layout matches
-/// what the bootloader set with SetVirtualAddressMap().
-pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
+/// It also sets up paging for the kernel heap located at KERNEL_BASE + 512MiB
+pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     let kernel_pml4 = unsafe { &raw const KERNEL_PML4 };
 
-    // Map first 2 GiB of physical memory to upper 2 GiB.
+    /*
+    TODO: remove this code; we do not map the next 2 GiB anymore.
+    // Map the first 2 GiB of physical memory to the upper 2 GiB.
     // First GiB is already done, so do the latter 1 GiB.
     let pdpt_idx: usize = ((KERNEL_BASE + (1 << 30)) & MASK_38_30) >> 30;
     let pdpte = 1 << 30u64 & MASK_47_30 as u64 | 0x83;
@@ -38,25 +46,55 @@ pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
         let boot_pdpt = unsafe { &raw mut BOOT_PDPT[pdpt_idx] };
         ptr::write_volatile(boot_pdpt, pdpte);
     }
+    */
 
-    // Map UEFI runtime service memory to space below kernel.
-    // memory_map contains ALL mappings, including ones unnecessary after exit_boot_services().
-    // It is our responsibility here to filter out unnecessary MemoryTypes.
+    let mut free_blocks = Vec::<(usize, usize)>::new();
+
     for mdesc in memory_map {
-        let ty = mdesc.ty;
-        let virt_start = mdesc.virt_start;
-        let phys_start = mdesc.phys_start;
-        let page_count = mdesc.page_count;
+        match mdesc.ty {
+            MemoryType::BOOT_SERVICES_CODE
+            | MemoryType::BOOT_SERVICES_DATA
+            | MemoryType::CONVENTIONAL => {
+                // TODO: exclude range of boot page tables
+                if let Some(block) = exclude_ranges(mdesc, &[0..1 << 30]) {
+                    free_blocks.push(block)
+                }
+            }
+            _ => { /* noop */ }
+        }
+    }
 
-        // TODO: implement later when we use UEFI runtime services.
-        // match mdesc.ty {
-        //     boot::MemoryType::RUNTIME_SERVICES_CODE => {
-        //     },
-        //     boot::MemoryType::RUNTIME_SERVICES_DATA => {
-        //
-        //     },
-        //     _ => { /* noop */ },
-        // }
+    {
+        PHYSICAL_PAGE_ALLOCATOR.lock().init(&free_blocks);
+    }
+
+    // TODO: map boot page tables to offset 0xffffff80000000000
+
+    for mdesc in memory_map {
+        // TODO: Map with KERNEL_BASE offset the following
+        //         - RUNTIME_SERVICES_CODE
+        //         - RUNTIME_SERVICES_DATA
+        //         - ACPI_RECLAIM
+        //         - ACPI_NON_VOLATILE
+        //         - MMIO
+        //         - MMIO_PORT_SPACE
+        //       Requires:
+        //         - Physical page allocator
+        //         - Virtual page allocator
+        match mdesc.ty {
+            MemoryType::RUNTIME_SERVICES_CODE
+            | MemoryType::RUNTIME_SERVICES_DATA
+            | MemoryType::ACPI_RECLAIM
+            | MemoryType::ACPI_NON_VOLATILE
+            | MemoryType::MMIO
+            | MemoryType::MMIO_PORT_SPACE => {
+                // TODO: Map [phys_start, phys_start + page_count * 4096) to
+                //       [KERNEL_BASE + phys_start, ...) so the layout matches what was set
+                //       via set_virtual_address_map(). Note that this may require obtaining free pages
+                //       from the physical page allocator, initialized in the for loop above.
+            }
+            _ => { /* noop */ }
+        }
     }
 
     // Unmap identity mapping for lower half entrypoint.
@@ -71,9 +109,9 @@ pub fn init_mm(memory_map: &[boot::MemoryDescriptor]) {
 fn flush_tlb() {
     unsafe {
         asm!(
-             "mov {tmp}, cr3",
-             "mov cr3, {tmp}",
-             tmp = out(reg) _,
+            "mov {tmp}, cr3",
+            "mov cr3, {tmp}",
+            tmp = out(reg) _,
         )
     }
 }
@@ -103,6 +141,45 @@ pub fn phys_addr(linear_addr: *const u8) -> *const u8 {
     } else {
         0 as *const u8
     }
+}
+
+fn exclude_range(
+    (start, length): (usize, usize),
+    range: ops::Range<usize>,
+) -> Option<(usize, usize)> {
+    let result = match (range.contains(&start), range.contains(&(start + length))) {
+        (true, true) => None,
+        (true, false) => {
+            let shift = range.end - start;
+            let start = range.end;
+            let length = length - shift;
+            Some((start, length))
+        }
+        (false, true) => {
+            let shift = (start + length) - range.start;
+            let start = start;
+            let length = length - shift;
+            Some((start, length))
+        }
+        _ => Some((start, length)),
+    };
+    result
+}
+
+fn exclude_ranges(
+    mdesc: &MemoryDescriptor,
+    ranges: &[ops::Range<usize>],
+) -> Option<(usize, usize)> {
+    let mut block = Some((
+        mdesc.phys_start as usize,
+        (mdesc.page_count * 0x1000) as usize,
+    ));
+
+    for range in ranges {
+        block = exclude_range(block?, range.clone())
+    }
+
+    block
 }
 
 /// Present; when 0, the entry is ignored

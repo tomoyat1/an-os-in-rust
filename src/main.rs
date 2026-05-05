@@ -8,6 +8,7 @@
 #![feature(sync_unsafe_cell)]
 extern crate alloc;
 extern crate bootlib;
+extern crate paging;
 extern crate rlibc;
 
 use core::arch::asm;
