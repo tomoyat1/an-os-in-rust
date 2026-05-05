@@ -12,10 +12,13 @@ use paging::physical;
 
 extern "C" {
     #[link_name = "boot_pml4"]
-    static mut KERNEL_PML4: [u64; 512];
+    static mut KERNEL_PML4: [PageEntry; 512];
 
     #[link_name = "boot_pdpt"]
-    static mut BOOT_PDPT: [u64; 512];
+    static mut BOOT_PDPT: [PageEntry; 512];
+
+    #[link_name = "boot_pdt"]
+    static mut BOOT_PDT: [PageEntry; 512];
 }
 
 static PHYSICAL_PAGE_ALLOCATOR: WithSpinLock<physical::PageAllocator> =
@@ -25,11 +28,14 @@ pub const KERNEL_BASE: usize = 0xffff800000000000;
 
 const MASK_51_12: usize = 0x000ffffffffff000;
 const MASK_51_30: usize = 0x000ffffffc0000000;
+const MASK_51_21: usize = 0x0000fffffffe00000;
 const MASK_47_12: usize = 0x0000fffffffff000;
 const MASK_47_39: usize = 0x0000ff8000000000;
 const MASK_47_30: usize = 0x0000fffffc0000000;
 const MASK_38_30: usize = 0x0000007fc0000000;
+const MASK_29_21: usize = 0x000000003fe00000;
 const MASK_29_0: usize = 0x000000003fffffff;
+const MASK_20_0: usize = 0x00000000001fffff;
 
 /// init_mm() (re)-initializes paging data structures for kernel execution.
 /// It also sets up paging for the kernel heap located at KERNEL_BASE + 512MiB
@@ -68,7 +74,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
         PHYSICAL_PAGE_ALLOCATOR.lock().init(&free_blocks);
     }
 
-    // TODO: map boot page tables to offset 0xffffff80000000000
+    // TODO: map boot page tables to offset 0xffff_ff800_0000_0000
 
     for mdesc in memory_map {
         // TODO: Map with KERNEL_BASE offset the following
@@ -117,29 +123,37 @@ fn flush_tlb() {
 }
 
 /// phys_addr returns the physical address for `linear_address`.
-// TODO: decide u64 or usize or *const u8.
 pub fn phys_addr(linear_addr: *const u8) -> *const u8 {
     let pml4e = {
         let idx = (linear_addr as usize & MASK_47_39) >> 39;
-        let kernel_pml4 = unsafe { &raw const KERNEL_PML4[idx] };
-        unsafe { ptr::read_volatile(kernel_pml4) }
-    } as usize;
+        let pml4e = unsafe { &raw const KERNEL_PML4[idx] };
+        unsafe { ptr::read(pml4e) }
+    };
 
     let pdpte = unsafe {
-        // We know the kernel base, so cheat by adding it.
-        // TODO: Design data structure that will tell us the virtual address of paging structures from just the
-        //       virtual address of PML4.
-        let pdpt = (KERNEL_BASE | pml4e & MASK_51_12) as *const u64;
+        // We know the kernel base, so get the virtual address of the pdpte just adding it.
+        // TODO: change this to paging structures base 0xffffff80000000000.
+        let pdpt = (KERNEL_BASE | pml4e.bytes & MASK_51_12) as *const PageEntry;
         let pdpt = from_raw_parts(pdpt, 512);
-        let idx = ((linear_addr as usize & MASK_38_30) >> 30) as usize;
-        pdpt[idx]
-    } as usize;
+        let idx = (linear_addr as usize & MASK_38_30) >> 30;
+        &pdpt[idx]
+    };
 
     // If PS = 1
-    if pdpte & 0x80 == 0x80 {
-        (pdpte & MASK_51_30 | (linear_addr as usize) & MASK_29_0) as *const u8
+    if pdpte.bytes & 0x80 == 0x80 {
+        (pdpte.bytes & MASK_51_30 | (linear_addr as usize) & MASK_29_0) as *const u8
     } else {
-        0 as *const u8
+        let pdte = unsafe {
+            let pdt = (KERNEL_BASE | pdpte.bytes & MASK_51_12) as *const PageEntry;
+            let pdt = from_raw_parts(pdt, 512);
+            let idx = (linear_addr as usize & MASK_29_21) >> 21;
+            &pdt[idx]
+        };
+        if pdte.get_flags(0x80) == 0x80 {
+            (pdte.bytes & MASK_51_21 | (linear_addr as usize) & MASK_20_0) as *const u8
+        } else {
+            0 as *const u8
+        }
     }
 }
 
