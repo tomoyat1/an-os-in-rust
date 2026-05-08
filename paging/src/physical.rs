@@ -60,7 +60,7 @@ impl PageAllocator {
 
     pub fn allocate(&mut self, order: usize) -> Option<Block> {
         let list_idx = order - PAGE_SIZE_ORDER;
-        if list_idx <= self.free_lists.len() {
+        if list_idx >= self.free_lists.len() {
             return None;
         }
 
@@ -107,13 +107,13 @@ fn is_buddy_in_range(addr: usize, block_size: usize, start: usize, size: usize) 
     }
 }
 
-struct Block {
+pub struct Block {
     addr: usize,
     order: usize,
 }
 
 impl Block {
-    pub(crate) fn get_addr(&self) -> usize {
+    pub fn get_addr(&self) -> usize {
         self.addr
     }
 }

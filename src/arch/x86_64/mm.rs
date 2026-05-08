@@ -9,7 +9,7 @@ use uefi::table::boot::{MemoryDescriptor, MemoryType};
 use crate::locking::spinlock::WithSpinLock;
 use crate::mm::malloc;
 use paging::{
-    physical, read_cr3, Mapper, PageEntry, MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30,
+    flush_tlb, physical, read_cr3, Mapper, PageEntry, MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30,
     MASK_47_30, MASK_47_39, MASK_51_12, MASK_51_21, MASK_51_30, PAGING_STRUCTURE_BASE,
     PRESENT_FLAG, PS_FLAG, RW_FLAG,
 };
@@ -31,10 +31,9 @@ extern "C" {
     static mut BOOT_PAGING_PDT: [PageEntry; 512];
 }
 
-static PHYSICAL_PAGE_ALLOCATOR: WithSpinLock<physical::PageAllocator> =
-    WithSpinLock::new(physical::PageAllocator::new());
-
-pub const KERNEL_BASE: usize = 0xffff800000000000;
+static MAPPER: WithSpinLock<Option<Mapper>> = WithSpinLock::new(None);
+pub const KERNEL_BASE: usize = 0xffff_8000_0000_0000;
+const MMIO_BASE: usize = 0xffff_ff00_0000_0000;
 
 /// init_mm() (re)-initializes paging data structures for kernel execution.
 /// It also sets up paging for the kernel heap located at KERNEL_BASE + 512MiB
@@ -55,14 +54,13 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
         }
     }
 
-    {
-        PHYSICAL_PAGE_ALLOCATOR.lock().init(&free_blocks);
-    }
+    let mut allocator = physical::PageAllocator::new();
+    allocator.init(&free_blocks);
 
     // Map first 2MiB of paging structures to 0xffff_ff80_0020_0000.
     let pml4 = unsafe { &raw mut KERNEL_PML4 };
-    let virt_addr = PAGING_STRUCTURE_BASE + read_cr3();
-    let idx = (virt_addr & MASK_47_39) >> 39;
+    let page_structure_base = PAGING_STRUCTURE_BASE + read_cr3();
+    let idx = (page_structure_base & MASK_47_39) >> 39;
     unsafe {
         let pdpt = &raw mut BOOT_PAGING_PDPT;
         let pdpt = pdpt as usize - KERNEL_BASE;
@@ -70,7 +68,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     }
 
     let pdpt = unsafe { &raw mut BOOT_PAGING_PDPT };
-    let idx = (virt_addr & MASK_38_30) >> 30;
+    let idx = (page_structure_base & MASK_38_30) >> 30;
     unsafe {
         let pdt = &raw mut BOOT_PAGING_PDT;
         let pdt = pdt as usize - KERNEL_BASE;
@@ -78,15 +76,23 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     }
 
     let pdt = unsafe { &raw mut BOOT_PAGING_PDT };
-    let idx = (virt_addr & MASK_29_21) >> 21;
+    let idx = (page_structure_base & MASK_29_21) >> 21;
     unsafe { (*pdt)[idx] = PageEntry::new(0x83, 0x200000) }
 
     flush_tlb();
 
     // TODO: initialize virtual memory mapper with PAGING_STRUCTURE_BASE, and initial offset of 0x7000
-    let mut mapper = Mapper::new(virt_addr, 0x200000, 7);
-    mapper.map(0x800000, 0xffff800000600000, 0x1000);
-    flush_tlb();
+    let mut mapper = Mapper::new(page_structure_base, 0x200000, 7, allocator);
+    {
+        let mut m = MAPPER.lock();
+        *m = Some(mapper)
+    }
+    MAPPER
+        .lock()
+        .as_mut()
+        .unwrap()
+        .alloc_page_at(0xffff800000600000);
+
     for mdesc in memory_map {
         // TODO: Map with KERNEL_BASE offset the following
         //         - RUNTIME_SERVICES_CODE
@@ -105,10 +111,11 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
             | MemoryType::ACPI_NON_VOLATILE
             | MemoryType::MMIO
             | MemoryType::MMIO_PORT_SPACE => {
-                // TODO: Map [phys_start, phys_start + page_count * 4096) to
-                //       [KERNEL_BASE + phys_start, ...) so the layout matches what was set
-                //       via set_virtual_address_map(). Note that this may require obtaining free pages
-                //       from the physical page allocator, initialized in the for loop above.
+                for p in 0..mdesc.page_count {
+                    let phys_addr = (mdesc.phys_start + p * 0x1000) as usize;
+                    let virt_addr = MMIO_BASE + (mdesc.phys_start + p * 0x1000) as usize;
+                    MAPPER.lock().as_mut().unwrap().map(phys_addr, virt_addr);
+                }
             }
             _ => { /* noop */ }
         }
@@ -120,17 +127,6 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     // kernel_pdpt[0] = 0;
 
     flush_tlb();
-}
-
-/// flush_tlb() flushes the TLB.
-fn flush_tlb() {
-    unsafe {
-        asm!(
-            "mov {tmp}, cr3",
-            "mov cr3, {tmp}",
-            tmp = out(reg) _,
-        )
-    }
 }
 
 /// phys_addr returns the physical address for `linear_address`.

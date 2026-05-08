@@ -1,18 +1,17 @@
 use core::arch::asm;
 
-pub const MASK_51_12: usize = 0x000ffffffffff000;
-pub const MASK_51_30: usize = 0x000ffffffc0000000;
-pub const MASK_51_21: usize = 0x0000fffffffe00000;
-pub const MASK_47_12: usize = 0x0000fffffffff000;
-pub const MASK_47_39: usize = 0x0000ff8000000000;
-pub const MASK_47_30: usize = 0x0000fffffc0000000;
-pub const MASK_38_30: usize = 0x0000007fc0000000;
-pub const MASK_29_21: usize = 0x000000003fe00000;
-pub const MASK_29_0: usize = 0x000000003fffffff;
-pub const MASK_20_12: usize = 0x00000000001ff000;
-pub const MASK_20_0: usize = 0x00000000001fffff;
-
-pub const PAGING_STRUCTURE_BASE: usize = 0xffffff8000000000;
+pub const MASK_51_12: usize = 0x000f_ffff_ffff_f000;
+pub const MASK_51_30: usize = 0x000f_ffff_ffc0_0000_00;
+pub const MASK_51_21: usize = 0x0000_ffff_fffe_0000_0;
+pub const MASK_47_12: usize = 0x0000_ffff_ffff_f000;
+pub const MASK_47_39: usize = 0x0000_ff80_0000_0000;
+pub const MASK_47_30: usize = 0x0000_ffff_fc00_0000_0;
+pub const MASK_38_30: usize = 0x0000_007f_c000_0000;
+pub const MASK_29_21: usize = 0x0000_0000_3fe0_0000;
+pub const MASK_29_0: usize = 0x0000_0000_3fff_ffff;
+pub const MASK_20_12: usize = 0x0000_0000_001f_f000;
+pub const MASK_20_0: usize = 0x0000_0000_001f_ffff;
+pub const PAGING_STRUCTURE_BASE: usize = 0xffff_ff80_0000_0000;
 
 pub fn read_cr3() -> usize {
     let cr3: usize;
@@ -23,4 +22,15 @@ pub fn read_cr3() -> usize {
         );
     }
     cr3
+}
+
+/// flush_tlb() flushes the TLB.
+pub fn flush_tlb() {
+    unsafe {
+        asm!(
+        "mov {tmp}, cr3",
+        "mov cr3, {tmp}",
+        tmp = out(reg) _,
+        )
+    }
 }

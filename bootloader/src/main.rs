@@ -25,7 +25,8 @@ use uefi::table::cfg::ACPI2_GUID;
 
 static mut SYSTEM_TABLE: *const () = 0x0 as *const ();
 
-const KERNEL_BASE: usize = 0xffff800000000000;
+const KERNEL_BASE: usize = 0xffff_8000_0000_0000;
+const MMIO_BASE: usize = 0xffff_ff00_0000_0000;
 
 #[entry]
 fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
@@ -97,7 +98,7 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         ve.page_count = entry.page_count;
         ve.att = entry.att;
         // The kernel will map runtime entries at KERNEL_BASE offset.
-        ve.virt_start = entry.phys_start + KERNEL_BASE as u64;
+        ve.virt_start = entry.phys_start + MMIO_BASE as u64;
         virt_mmap.push(ve);
     }
 

@@ -1,27 +1,34 @@
 use super::*;
-use core::ops::Add;
+use crate::physical::PageAllocator;
 
 const BOOT_PAGE_TABLE_COUNT: usize = 7;
 
+// TODO: make this a trait if we support architectures other than x86_64.
 pub struct Mapper {
     base: usize,
     length: usize,
     // TODO: Bump style allocation will break with offset mapping.
     //       Use better allocation method
     next: usize,
+
+    page_allocator: PageAllocator,
 }
 
 impl Mapper {
-    pub fn new(base: usize, length: usize, next: usize) -> Self {
-        let ptr = base as *mut u8;
-        for i in BOOT_PAGE_TABLE_COUNT * 0x1000..length {
-            unsafe {
-                ptr.add(i).write_volatile(0);
-            }
+    pub fn new(base: usize, length: usize, next: usize, page_allocator: PageAllocator) -> Self {
+        let ptr = (base + BOOT_PAGE_TABLE_COUNT * 0x1000) as *mut u8;
+        unsafe {
+            core::ptr::write_bytes(ptr, 0u8, length - BOOT_PAGE_TABLE_COUNT * 0x1000);
         }
-        Mapper { base, length, next }
+        Mapper {
+            base,
+            length,
+            next,
+            page_allocator,
+        }
     }
-    pub fn map(&mut self, phys_addr: usize, virt_addr: usize, size: usize) {
+
+    pub fn map(&mut self, phys_addr: usize, virt_addr: usize) {
         let mut mask = MASK_47_39;
         let mut shift = 39;
         let mut page_table = (read_cr3() + PAGING_STRUCTURE_BASE) as *mut PageEntry;
@@ -50,6 +57,16 @@ impl Mapper {
         };
         pte.set_addr(phys_addr & MASK_51_12);
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
+        flush_tlb();
+    }
+    pub fn alloc_page_at(&mut self, virt_addr: usize) {
+        let phys_addr = self.page_allocator.allocate(12);
+        match phys_addr {
+            Some(phys_addr) => self.map(phys_addr.get_addr(), virt_addr),
+            None => {
+                panic!("No available physical pages!")
+            }
+        }
     }
 
     fn new_table(&mut self) -> usize {
