@@ -131,38 +131,11 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
 
 /// phys_addr returns the physical address for `linear_address`.
 pub fn phys_addr(linear_addr: *const u8) -> *const u8 {
-    let pml4e = {
-        let idx = (linear_addr as usize & MASK_47_39) >> 39;
-        let pml4e = unsafe { &raw const KERNEL_PML4[idx] };
-        unsafe { ptr::read(pml4e) }
-    };
-
-    let pdpte = unsafe {
-        // We know the kernel base, so get the virtual address of the pdpte just adding it.
-        // TODO: change this to paging structures base 0xffffff80000000000.
-        let pdpt = (KERNEL_BASE | pml4e.get_addr()) as *const PageEntry;
-        let pdpt = from_raw_parts(pdpt, 512);
-        let idx = (linear_addr as usize & MASK_38_30) >> 30;
-        &pdpt[idx]
-    };
-
-    // If PS = 1
-    if pdpte.get_flags(PS_FLAG) & PS_FLAG == PS_FLAG {
-        (pdpte.get_addr() & MASK_51_30 | (linear_addr as usize) & MASK_29_0) as *const u8
-    } else {
-        let pdte = unsafe {
-            let pdt = (KERNEL_BASE | pdpte.get_addr()) as *const PageEntry;
-            let pdt = from_raw_parts(pdt, 512);
-            let idx = (linear_addr as usize & MASK_29_21) >> 21;
-            &pdt[idx]
-        };
-        if pdte.get_flags(0x80) == 0x80 {
-            (pdte.get_addr() & MASK_51_21 | (linear_addr as usize) & MASK_20_0) as *const u8
-        } else {
-            // Mappings by PTs are currently unsupported.
-            0 as *const u8
-        }
-    }
+    MAPPER
+        .lock()
+        .as_mut()
+        .unwrap()
+        .phys_addr(linear_addr as usize) as *const u8
 }
 
 fn exclude_range(
