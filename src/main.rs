@@ -17,7 +17,7 @@ use core::panic::PanicInfo;
 
 mod arch;
 use arch::x86_64::interrupt;
-use arch::x86_64::mm::{init_mm, KERNEL_BASE};
+use arch::x86_64::mm::{init_mm, KERNEL_BASE, MMIO_BASE};
 use arch::x86_64::pm;
 use arch::x86_64::{hpet, pit};
 
@@ -44,7 +44,7 @@ mod net;
 /// # Arguments
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
 pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
-    let boot_data = boot::BootData::relocate(boot_data, KERNEL_BASE);
+    let mut boot_data = boot::BootData::relocate(boot_data, MMIO_BASE);
     let madt = acpi::parse_madt(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
     init_mm(boot_data.memory_map); // TODO: error handling
     let gdt = pm::init();

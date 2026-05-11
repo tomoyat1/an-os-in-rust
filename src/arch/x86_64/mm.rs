@@ -5,8 +5,7 @@ use core::ptr;
 use core::slice::from_raw_parts;
 
 use uefi::table::boot::{MemoryDescriptor, MemoryType};
-
-use crate::locking::spinlock::WithSpinLock;
+use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::mm::malloc;
 use paging::{
     flush_tlb, physical, read_cr3, Mapper, PageEntry, MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30,
@@ -32,11 +31,11 @@ extern "C" {
 }
 
 static MAPPER: WithSpinLock<Option<Mapper>> = WithSpinLock::new(None);
+
 pub const KERNEL_BASE: usize = 0xffff_8000_0000_0000;
-const MMIO_BASE: usize = 0xffff_ff00_0000_0000;
+pub const MMIO_BASE: usize = 0xffff_ff00_0000_0000;
 
 /// init_mm() (re)-initializes paging data structures for kernel execution.
-/// It also sets up paging for the kernel heap located at KERNEL_BASE + 512MiB
 pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     let mut free_blocks = Vec::<(usize, usize)>::new();
 
@@ -45,7 +44,6 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
             MemoryType::BOOT_SERVICES_CODE
             | MemoryType::BOOT_SERVICES_DATA
             | MemoryType::CONVENTIONAL => {
-                // TODO: exclude range of boot page tables
                 if let Some(block) = exclude_ranges(mdesc, &[0..0x800000]) {
                     free_blocks.push(block)
                 }
@@ -81,7 +79,6 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
 
     flush_tlb();
 
-    // TODO: initialize virtual memory mapper with PAGING_STRUCTURE_BASE, and initial offset of 0x7000
     let mut mapper = Mapper::new(page_structure_base, 0x200000, 7, allocator);
     {
         let mut m = MAPPER.lock();
@@ -109,6 +106,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
             | MemoryType::RUNTIME_SERVICES_DATA
             | MemoryType::ACPI_RECLAIM
             | MemoryType::ACPI_NON_VOLATILE
+            | MemoryType::LOADER_DATA
             | MemoryType::MMIO
             | MemoryType::MMIO_PORT_SPACE => {
                 for p in 0..mdesc.page_count {
@@ -121,10 +119,12 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
         }
     }
 
-    // Unmap identity mapping for lower half entrypoint.
-    // If we tear this down here, APIC related code which depends on identity mapping does not work.
-
-    // kernel_pdpt[0] = 0;
+    let pml4 = unsafe { &raw mut KERNEL_PML4 };
+    let page_structure_base = PAGING_STRUCTURE_BASE + read_cr3();
+    unsafe {
+        let pml4e = &mut (*pml4)[0];
+        pml4e.set_flags(PRESENT_FLAG, false)
+    }
 
     flush_tlb();
 }
@@ -136,6 +136,10 @@ pub fn phys_addr(linear_addr: *const u8) -> *const u8 {
         .as_mut()
         .unwrap()
         .phys_addr(linear_addr as usize) as *const u8
+}
+
+pub fn mapper() -> WithSpinLockGuard<'static, Option<Mapper>> {
+    MAPPER.lock()
 }
 
 fn exclude_range(

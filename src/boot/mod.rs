@@ -4,6 +4,7 @@ use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 use uefi::table;
 use uefi::table::boot;
 use uefi::table::boot::MemoryDescriptor;
+use crate::arch::x86_64::mm;
 
 pub(crate) struct BootData<'a> {
     pub memory_map: &'a [boot::MemoryDescriptor],
@@ -13,19 +14,17 @@ pub(crate) struct BootData<'a> {
 }
 
 impl<'a> BootData<'a> {
-    pub fn relocate(mut phys_boot_data: *mut bootlib::types::BootData, kernel_base: usize) -> Self {
+    pub fn relocate(mut phys_boot_data: *mut bootlib::types::BootData, base: usize) -> Self {
         let phys_boot_data = unsafe { &mut *phys_boot_data };
         let mm_sz = phys_boot_data.memory_map_len;
-        let acpi_rsdp = phys_boot_data.acpi_rsdp;
+        let acpi_rsdp = ((phys_boot_data.acpi_rsdp as usize) + base) as *const c_void;
 
-        // On QEMU, phys_boot_data.memory_map_buf happens to be larger than 2 GiB, causing mm_ptr to
-        // overflow and resulting in a panic. Oh, shit.
         let mm_ptr = phys_boot_data.memory_map_buf;
         let mmap = slice_from_raw_parts(mm_ptr as *const MemoryDescriptor, mm_sz);
 
         Self {
             memory_map: unsafe { &*mmap },
-            framebuffer: RawFramebuffer::relocate(&phys_boot_data.framebuffer, kernel_base),
+            framebuffer: RawFramebuffer::relocate(&phys_boot_data.framebuffer, base),
             system_table: unsafe { &*phys_boot_data.system_table },
             acpi_rsdp,
         }

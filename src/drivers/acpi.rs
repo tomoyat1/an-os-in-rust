@@ -6,6 +6,7 @@ use core::mem::size_of;
 use core::ptr;
 use core::ptr::slice_from_raw_parts;
 use uefi::proto::network::pxe::ReadDirParseError;
+use crate::arch::x86_64::mm;
 
 pub struct MADT {
     pub lapic_addr: usize,
@@ -105,7 +106,7 @@ pub fn parse_madt(rsdp: *const core::ffi::c_void) -> Result<MADT, String> {
         interrupt_mappings: vec::Vec::new(),
     };
     for e in 0..len {
-        let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize)) };
+        let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize)) } + mm::MMIO_BASE;
         let header = unsafe { ptr::read_unaligned(entry_addr as *const DescriptionHeader) };
         let signature = core::str::from_utf8(&header.signature).expect("failed to parse signature");
 
@@ -120,7 +121,7 @@ pub fn parse_madt(rsdp: *const core::ffi::c_void) -> Result<MADT, String> {
 pub fn parse_hpet(rsdp: *const core::ffi::c_void) -> Result<HPET, String> {
     let (xsdt_entry_addr, len) = _parse_xsdt(rsdp);
     for e in 0..len {
-        let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize)) };
+        let entry_addr = unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize)) } + mm::MMIO_BASE;
         let header = unsafe { ptr::read_unaligned(entry_addr as *const DescriptionHeader) };
         let signature = core::str::from_utf8(&header.signature).expect("failed to parse signature");
 
@@ -181,13 +182,13 @@ pub fn _parse_xsdt(rsdp: *const core::ffi::c_void) -> (*const usize, usize) {
     let rsdp = unsafe { ptr::read_unaligned(rsdp as *const RSDP) };
     assert_eq!(&rsdp.signature, b"RSD PTR ");
 
-    let xsdt_addr = rsdp.xsdt_addr;
+    let xsdt_addr = rsdp.xsdt_addr + mm::MMIO_BASE;
     let xsdt = unsafe { ptr::read_unaligned(xsdt_addr as *const XSDT) };
     assert_eq!(&xsdt.signature, b"XSDT");
 
     let len = ((xsdt.length - 36) / 8) as usize;
     // HACK: since we know the offset of xsdt.entry from the ACPI specs, calculate its address manually.
-    let xsdt_entry_addr = rsdp.xsdt_addr + 36;
+    let xsdt_entry_addr = rsdp.xsdt_addr + mm::MMIO_BASE + 36;
     (xsdt_entry_addr as *const usize, len)
 }
 
@@ -200,7 +201,7 @@ fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
     let tail = madt_addr + length as usize;
 
     let mut madt_info = MADT {
-        lapic_addr: madt.lapic_addr as usize,
+        lapic_addr: madt.lapic_addr as usize + mm::MMIO_BASE,
         ioapic_addr: 0,
         global_system_interrupt_base: 0,
         interrupt_mappings: vec::Vec::new(),
@@ -213,7 +214,7 @@ fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
                 // I/O APIC
                 let controller = head as *const InterruptController<IOAPIC>;
                 let controller = unsafe { &*controller };
-                madt_info.ioapic_addr = controller.type_specific.addr as usize;
+                madt_info.ioapic_addr = controller.type_specific.addr as usize + mm::MMIO_BASE;
                 madt_info.global_system_interrupt_base =
                     controller.type_specific.global_system_interrupt_base;
             }
@@ -231,12 +232,17 @@ fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
                 // Local APIC address override
                 let lapic_override = head as *const InterruptController<LAPCIOverride>;
                 let lapic_override = unsafe { &*lapic_override };
-                madt_info.lapic_addr = lapic_override.type_specific.addr as usize;
+                madt_info.lapic_addr = lapic_override.type_specific.addr as usize + mm::MMIO_BASE;
             }
             _ => {}
         }
         head += length as usize;
     }
+    let mut mapper = mm::mapper();
+    let mut mapper = mapper.as_mut().unwrap();
+    mapper.map(madt_info.ioapic_addr -  mm::MMIO_BASE, madt_info.ioapic_addr);
+    mapper.map(madt_info.lapic_addr -  mm::MMIO_BASE, madt_info.lapic_addr);
+
     madt_info
 }
 
@@ -257,10 +263,11 @@ fn _parse_hpet(hpet_addr: usize, length: u32) -> HPET {
         address_space_id: hpet.address_space_id,
         register_bit_width: hpet.register_bit_width,
         register_bit_offset: hpet.register_bit_offset,
-        base_address: hpet.base_address,
+        base_address: hpet.base_address + mm::MMIO_BASE,
         hpet_number: hpet.hpet_number,
         minimum_tick: hpet.minimum_tick,
         page_protection: hpet.page_protection,
     };
+    mm::mapper().as_mut().unwrap().map(hpet_info.base_address - mm::MMIO_BASE, hpet_info.base_address);
     hpet_info
 }

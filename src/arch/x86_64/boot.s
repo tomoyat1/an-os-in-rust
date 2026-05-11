@@ -98,37 +98,6 @@ _low_start:
     movq %r9, 0(%r8)
     # end identity-map 0xBE4D0000
 
-    # Identity-map 0xC0000000
-    # This is for numerous things, such as UEFI allocated heap and ACPI tables.
-    # TODO: Map this in Rust code, at offset 0xffff_ff00_0000_0000 (PML4[510])
-    # pml4
-    movabsq $(boot_pml4 - KERNEL_BASE), %r8 # base of pml4
-    movabsq $(boot_idmap_pdpt - KERNEL_BASE), %r9 # phys addr of pdpt; do not reuse pdpt because boot heap is in
-                                                # another 512GiB region than higher-half kernel.
-    movq $0x0000FFFFFFFFF000, %r12 # mask for bits 47:12
-    andq %r12, %r9
-    orq $0x0000000000000003, %r9
-    movq $0xC0000000, %r11 # linear address
-    movq $0x0000FF8000000000, %rcx #  mask for 47:39
-    andq %rcx, %r11 # offset in pml4 are determined from bits 47:39 in linear address
-    shrq $36, %r11 # bits 47:39 of linear address are bits 11:3 of pdpte
-    addq %r11, %r8 # add offset into pml4 to pml4 base addr
-    movq %r9, 0(%r8)
-
-    # pdpt
-    movabsq $(boot_idmap_pdpt - KERNEL_BASE), %r8
-    movq $0xC0000000, %r9
-    movq $0x0000FFFFC0000000, %r12 # mask for 47:30
-    andq %r12, %r9
-    orq $0x0000000000000083, %r9 # map 1 Gib, since identity mapping gets teared down right after this.
-    movq $0xC0000000, %r11 # linear address
-    movq $0x0000007FC0000000, %rcx #  mask for 38:30
-    andq %rcx, %r11 # offset in pdt are determined from bits 38:30 in linear address
-    shrq $27, %r11 # bits 38:30 of linear address are bits 11:3 of pdpte
-    addq %r11, %r8 # add offset into pdt to pdpt base addr
-    movq %r9, 0(%r8)
-    # end identity-map 0xC0000000
-
     # Map bottom 6 MiB of physical memory to KERNEL_BASE
     movabsq $(boot_pml4 - KERNEL_BASE), %r8
     movabsq $(boot_pdpt - KERNEL_BASE), %r9
