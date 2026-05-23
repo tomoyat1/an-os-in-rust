@@ -45,8 +45,8 @@ mod net;
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
 pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     let mut boot_data = boot::BootData::relocate(boot_data, MMIO_BASE);
-    let madt = acpi::parse_madt(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
     init_mm(boot_data.memory_map); // TODO: error handling
+    let madt = acpi::parse_madt(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
     let gdt = pm::init();
 
     sched::init();
