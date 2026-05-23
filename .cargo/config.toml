@@ -4,9 +4,3 @@ rustflags = [
     "-C", "link-args=-g",
     "-C", "code-model=large"
 ]
-
-[build]
-target = "x86_64-unknown-aosir.json"
-
-[unstable]
-build-std = ["core", "alloc"]
