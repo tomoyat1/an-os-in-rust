@@ -153,7 +153,7 @@ impl RTL8139 {
         };
 
         // Init recv buffer
-        let rx_buf_addr = rtl8139.rx_buf.buf.as_ptr() as *const u8;
+        let rx_buf_addr = rtl8139.rx_buf.buf.as_ptr();
         let rx_buf_addr = mm::phys_addr(rx_buf_addr);
         unsafe { rtl8139.outl(REG_RBSTART, rx_buf_addr as u32) }
 
