@@ -9,8 +9,8 @@
 extern crate alloc;
 extern crate bootlib;
 extern crate paging;
-extern crate x86_64;
 extern crate rlibc;
+extern crate x86_64;
 
 use core::arch::asm;
 use core::fmt::{Debug, Write};

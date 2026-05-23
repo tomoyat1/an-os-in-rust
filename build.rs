@@ -29,7 +29,13 @@ fn main() {
         .unwrap();
 
     Command::new(gcc)
-        .args(&["src/arch/x86_64/task_switch.s", "-c", "-mcmodel=large", "-g", "-o"])
+        .args(&[
+            "src/arch/x86_64/task_switch.s",
+            "-c",
+            "-mcmodel=large",
+            "-g",
+            "-o",
+        ])
         .arg(&format!("{}/libtaskswitch.a", out_dir))
         .status()
         .unwrap();

@@ -1,10 +1,10 @@
 use core::ffi::c_void;
 use core::ptr::{slice_from_raw_parts, slice_from_raw_parts_mut};
 
+use crate::arch::x86_64::mm;
 use uefi::table;
 use uefi::table::boot;
 use uefi::table::boot::MemoryDescriptor;
-use crate::arch::x86_64::mm;
 
 pub(crate) struct BootData<'a> {
     pub memory_map: &'a [boot::MemoryDescriptor],
