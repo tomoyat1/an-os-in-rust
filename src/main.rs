@@ -9,6 +9,7 @@
 extern crate alloc;
 extern crate bootlib;
 extern crate paging;
+extern crate x86_64;
 extern crate rlibc;
 
 use core::arch::asm;

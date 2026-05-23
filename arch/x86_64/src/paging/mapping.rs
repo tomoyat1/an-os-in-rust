@@ -1,5 +1,7 @@
 use super::*;
-use crate::physical::PageAllocator;
+use crate::paging::table::{PageEntry, PRESENT_FLAG, PS_FLAG, RW_FLAG};
+
+use paging_common::physical::PageAllocator;
 
 const BOOT_PAGE_TABLE_COUNT: usize = 7;
 

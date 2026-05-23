@@ -4,13 +4,15 @@ use core::ops;
 use core::ptr;
 use core::slice::from_raw_parts;
 
-use uefi::table::boot::{MemoryDescriptor, MemoryType};
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::mm::malloc;
-use paging::{
-    flush_tlb, physical, read_cr3, Mapper, PageEntry, MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30,
-    MASK_47_30, MASK_47_39, MASK_51_12, MASK_51_21, MASK_51_30, PAGING_STRUCTURE_BASE,
-    PRESENT_FLAG, PS_FLAG, RW_FLAG,
+use paging::physical;
+use uefi::table::boot::{MemoryDescriptor, MemoryType};
+use x86_64::paging::mapping::Mapper;
+use x86_64::paging::table::{PageEntry, PRESENT_FLAG, RW_FLAG};
+use x86_64::paging::{
+    flush_tlb, read_cr3, MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30, MASK_47_30, MASK_47_39,
+    MASK_51_12, MASK_51_21, MASK_51_30, PAGING_STRUCTURE_BASE,
 };
 
 extern "C" {
