@@ -4,25 +4,31 @@ use std::process::Command;
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
 
-    Command::new("gcc")
+    let gcc = match env::consts::OS {
+        "macos" => "x86_64-elf-gcc",
+        "linux" => "gcc",
+        _ => panic!("Unsupported platform"),
+    };
+
+    Command::new(gcc)
         .args(&["src/arch/x86_64/boot.s", "-c", "-mcmodel=large", "-g", "-o"])
         .arg(&format!("{}/libboot.a", out_dir))
         .status()
         .unwrap();
 
-    Command::new("gcc")
+    Command::new(gcc)
         .args(&["src/arch/x86_64/pm.s", "-c", "-mcmodel=large", "-g", "-o"])
         .arg(&format!("{}/libpm.a", out_dir))
         .status()
         .unwrap();
 
-    Command::new("gcc")
+    Command::new(gcc)
         .args(&["src/arch/x86_64/isr.s", "-c", "-mcmodel=large", "-g", "-o"])
         .arg(&format!("{}/libisr.a", out_dir))
         .status()
         .unwrap();
 
-    Command::new("gcc")
+    Command::new(gcc)
         .args(&["src/arch/x86_64/task_switch.s", "-c", "-mcmodel=large", "-g", "-o"])
         .arg(&format!("{}/libtaskswitch.a", out_dir))
         .status()
