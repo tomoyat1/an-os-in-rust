@@ -10,6 +10,8 @@ _do_switch:
 
     movq %rsp, 8(%rdi)
     movq 8(%rsi), %rsp
+    movq 16(%rsi), %rbx
+    movq %rbx, %cr3
 
     popq %r15
     popq %r14

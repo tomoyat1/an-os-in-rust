@@ -179,7 +179,7 @@ impl TaskList {
         // We only read the address
         let mut idle_task_stack = unsafe { &raw mut boot_stack };
 
-        // SAFETY: The idle_task_stack never goes out of scope, as long as the kernel is running.
+        // SAFETY: The idle_task_stack never goes out of scope as long as the kernel is running.
         //         Therefore, it is safe to pretend that the memory for the stack was allocated
         //         by the GlobalAllocator, even if it wasn't.
         let mut idle_task_stack = unsafe { Box::from_raw(idle_task_stack) };
