@@ -32,6 +32,7 @@ pub const PAT_FLAG: usize = 1 << 12;
 
 /// A paging structure entry.
 #[repr(C)]
+#[derive(Clone)]
 pub struct PageEntry {
     bytes: usize,
 }

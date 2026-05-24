@@ -71,7 +71,7 @@ impl Mapper {
         let mut page_table = (read_cr3() + PAGING_STRUCTURE_BASE) as *mut [PageEntry; 512];
 
         // Unconditionally traverse once from PML4 to PDPT.
-        let idx = ((virt_addr & mask) >> shift);
+        let idx = (virt_addr & mask) >> shift;
         let mut entry = unsafe { &mut (*page_table)[idx] };
         page_table = (entry.get_addr() + PAGING_STRUCTURE_BASE) as *mut [PageEntry; 512];
 
@@ -87,6 +87,25 @@ impl Mapper {
             }
         }
         entry.get_addr() + (virt_addr & !(0xFFFF_FFFF_FFFF_FFFF - ((1 << shift) - 1)))
+    }
+
+    pub fn fork(&mut self, cr0: usize) -> usize {
+        let mut src_pml4 = (cr0 + PAGING_STRUCTURE_BASE) as *mut [PageEntry; 512];
+        let src_pml4 = unsafe { &*src_pml4 };
+        let dst_pml4 = self.new_table() as *mut [PageEntry; 512];
+        let dst_pml4 = unsafe { &mut *dst_pml4 };
+
+        // Shallow copy kernel address space
+        for i in 256..512usize {
+            let entry = &src_pml4[i];
+            if entry.get_flags(PRESENT_FLAG) != PRESENT_FLAG {
+                continue;
+            }
+            dst_pml4[i] = entry.clone();
+        }
+        // TODO: set up copy-on-write for userland address space (PML4 index 0 to 255)
+
+        (dst_pml4 as *const [PageEntry; 512] as usize) - PAGING_STRUCTURE_BASE
     }
 
     fn new_table(&mut self) -> usize {

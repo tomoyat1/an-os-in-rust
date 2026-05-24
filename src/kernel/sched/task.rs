@@ -1,4 +1,5 @@
 use crate::arch::x86_64::hpet;
+use crate::arch::x86_64::mm::mapper;
 use crate::kernel::sched::{Scheduler, SCHED_LATENCY};
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::some_task;
@@ -142,11 +143,17 @@ impl TaskList {
         let mut kernel_stack = unsafe {
             let layout = Layout::new::<Task>();
             let ptr = alloc(layout) as *mut Task;
+
+            // TODO: create separate address space by going through the Mapper.
+            let cr3 = mapper()
+                .as_mut()
+                .unwrap()
+                .fork(current_task.info.registers.cr3);
             (*ptr).info.registers = Registers {
                 stack_top: 0,
 
                 // Support for separate address space to be added later.
-                cr3: current_task.info.registers.cr3,
+                cr3,
             };
             (*ptr).info.flags = TaskFlags(0x1);
             (*ptr).info.last_scheduled = 0;
