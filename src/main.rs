@@ -4,7 +4,6 @@
 #![feature(alloc_error_handler)]
 #![allow(unused)]
 #![allow(unused_unsafe)]
-#![feature(extract_if)]
 #![feature(sync_unsafe_cell)]
 extern crate alloc;
 extern crate bootlib;

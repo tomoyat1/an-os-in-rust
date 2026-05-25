@@ -121,7 +121,7 @@ impl PCI {
         let mut v = Vec::<PCIDevice>::new();
 
         // Give ownership of matched devices to the caller.
-        for d in self.devices.extract_if(p) {
+        for d in self.devices.extract_if(.., p) {
             v.push(d)
         }
         v

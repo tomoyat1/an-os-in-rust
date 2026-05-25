@@ -4,13 +4,21 @@
 
 ## Requirements
 
-- Rust nightly-2024-10-31-x86_64-unknown-linux-gnu
+- Rust nightly-2025-10-31
     - Be sure to add `rust-src` component, as it will be needed to build rust core library for `x86_64-unknown-uefi`.
-    - Steps:
+    - Linux host
       ```console
       % cd /path/to/an-os-in-rust
-      % rustup override set nightly-2024-10-31-x86_64-unknown-linux-gnu # This sets the toolchain for the an-os-in-rust directory.
-      % rustup component add rust-src --toolchain nightly-2024-10-31-x86_64-unknown-linux-gnu  # This adds the `rust-src` component for the nightly toolchain
+      % rustup toolchain install nightly-2025-10-31-x86_64-unknown-linux-gnu
+      % rustup override set nightly-2025-10-31-x86_64-unknown-linux-gnu # This sets the toolchain for the an-os-in-rust directory.
+      % rustup component add rust-src --toolchain nightly-2025-10-31-x86_64-unknown-linux-gnu  # This adds the `rust-src` component for the nightly toolchain
+      ```
+    - macOS host
+      ```console
+      % cd /path/to/an-os-in-rust
+      % rustup toolchain install nightly-2025-10-31-aarch64-apple-darwin
+      % rustup override set nightly-2025-10-31-aarch64-apple-darwin # This sets the toolchain for the an-os-in-rust directory.
+      % rustup component add rust-src --toolchain nightly-2025-10-31-aarch64-apple-darwin  # This adds the `rust-src` component for the nightly toolchain
       ```
 - An UEFI compatible machine (Tested on QEMU with OVMF)
 

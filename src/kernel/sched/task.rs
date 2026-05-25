@@ -153,7 +153,7 @@ impl TaskList {
             (*ptr).info.total_runtime = 0;
             (*ptr).stack = [0; KERNEL_STACK_SIZE - size_of::<TaskInfo>()];
 
-            (*ptr).stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>() - 8)
+            (&mut (*ptr)).stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>() - 8)
                 ..(KERNEL_STACK_SIZE - size_of::<TaskInfo>())]
                 .copy_from_slice(&(_task_entry as usize).to_le_bytes());
             Box::from_raw(ptr)

@@ -43,7 +43,7 @@ struct _MADT {
     int_ctrlr_struct: u8,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 struct _HPET {
     event_timer_block_id: u32,
     address_space_id: u8,

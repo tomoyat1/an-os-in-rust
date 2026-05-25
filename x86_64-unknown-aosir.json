@@ -8,21 +8,21 @@
   "env": "",
   "executables": true,
   "features": "-mmx,-sse,+soft-float",
-  "link-dead-code": "y",
   "linker-flavor": "ld",
   "llvm-target": "x86_64-unknown-none",
-  "lto": "no",
+  "requires-lto": false,
   "max-atomic-width": 64,
   "os": "none",
   "panic-strategy": "abort",
   "position-independent-executables": false,
-  "relocation-model": false,
+  "relocation-model": "static",
+  "rustc-abi": "x86-softfloat",
   "singlethread": true,
   "stack-probes": {
     "kind": "call"
   },
-  "target-c-int-width": "32",
+  "target-c-int-width": 32,
   "target-endian": "little",
-  "target-pointer-width": "64",
+  "target-pointer-width": 64,
   "vendor": "unknown"
 }
