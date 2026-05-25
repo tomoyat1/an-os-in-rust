@@ -61,6 +61,6 @@ impl PageEntry {
     }
 
     pub fn set_addr(&mut self, addr: usize) {
-        self.bytes |= addr & MASK_51_12;
+        self.bytes = (self.bytes & !MASK_51_12) | (addr & MASK_51_12);
     }
 }
