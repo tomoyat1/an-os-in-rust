@@ -1,5 +1,6 @@
 use super::*;
 use crate::paging::table::{PageEntry, PRESENT_FLAG, PS_FLAG, RW_FLAG};
+use core::ptr::write_bytes;
 
 use paging_common::physical::PageAllocator;
 
@@ -20,7 +21,7 @@ impl Mapper {
     pub fn new(base: usize, length: usize, next: usize, page_allocator: PageAllocator) -> Self {
         let ptr = (base + BOOT_PAGE_TABLE_COUNT * 0x1000) as *mut u8;
         unsafe {
-            core::ptr::write_bytes(ptr, 0u8, length - BOOT_PAGE_TABLE_COUNT * 0x1000);
+            write_bytes(ptr, 0u8, length - BOOT_PAGE_TABLE_COUNT * 0x1000);
         }
         Mapper {
             base,
@@ -55,6 +56,7 @@ impl Mapper {
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
         flush_tlb();
     }
+
     pub fn alloc_page_at(&mut self, virt_addr: usize) {
         let phys_addr = self.page_allocator.allocate(12);
         match phys_addr {
@@ -89,8 +91,8 @@ impl Mapper {
         entry.get_addr() + (virt_addr & !(0xFFFF_FFFF_FFFF_FFFF - ((1 << shift) - 1)))
     }
 
-    pub fn fork(&mut self, cr0: usize) -> usize {
-        let mut src_pml4 = (cr0 + PAGING_STRUCTURE_BASE) as *mut [PageEntry; 512];
+    pub fn fork(&mut self, cr3: usize) -> usize {
+        let mut src_pml4 = (cr3 + PAGING_STRUCTURE_BASE) as *mut [PageEntry; 512];
         let src_pml4 = unsafe { &*src_pml4 };
         let dst_pml4 = self.new_table() as *mut [PageEntry; 512];
         let dst_pml4 = unsafe { &mut *dst_pml4 };
@@ -103,14 +105,68 @@ impl Mapper {
             }
             dst_pml4[i] = entry.clone();
         }
-        // TODO: set up copy-on-write for userland address space (PML4 index 0 to 255)
+        for i in 0..256usize {
+            let entry = &src_pml4[i];
+            if entry.get_flags(PRESENT_FLAG) != PRESENT_FLAG {
+                continue;
+            }
+            dst_pml4[i] = entry.clone();
+            let dst_table = self.new_table();
+            dst_pml4[i].set_addr(dst_table - PAGING_STRUCTURE_BASE);
+            let dst_table = dst_table as *mut [PageEntry; 512];
+            let src_table = entry.get_addr() + PAGING_STRUCTURE_BASE;
+            let src_table = src_table as *mut [PageEntry; 512];
+            self.recursively_clone(unsafe { &mut *src_table }, unsafe { &mut *dst_table }, 3);
+        }
 
         (dst_pml4 as *const [PageEntry; 512] as usize) - PAGING_STRUCTURE_BASE
+    }
+
+    fn recursively_clone(
+        &mut self,
+        src: &mut [PageEntry; 512],
+        dst: &mut [PageEntry; 512],
+        level: usize, // 3: pdpt, 2: pdt, 1: pt
+    ) {
+        for i in 0..512usize {
+            let src_entry = &mut src[i];
+            let dst_entry = &mut dst[i];
+            if level == 1 {
+                // src_entry is a pte
+                if src_entry.get_flags(PRESENT_FLAG) != PRESENT_FLAG {
+                    continue;
+                }
+                *dst_entry = src_entry.clone();
+                dst_entry.set_flags(RW_FLAG, false);
+                src_entry.set_flags(RW_FLAG, false);
+            } else {
+                // src_entry is a pdpt or pdt
+                if src_entry.get_flags(PRESENT_FLAG) != PRESENT_FLAG {
+                    continue;
+                }
+                *dst_entry = src_entry.clone();
+                let dst_table = self.new_table();
+                dst_entry.set_addr(dst_table - PAGING_STRUCTURE_BASE);
+
+                let dst_table = dst_table as *mut [PageEntry; 512];
+                let src_table = src_entry.get_addr() + PAGING_STRUCTURE_BASE;
+                let src_table = src_table as *mut [PageEntry; 512];
+                self.recursively_clone(
+                    unsafe { &mut *src_table },
+                    unsafe { &mut *dst_table },
+                    level - 1,
+                );
+            }
+        }
     }
 
     fn new_table(&mut self) -> usize {
         let new_table = self.base + self.next * 0x1000;
         self.next += 1;
+        let ptr = new_table as *mut u8;
+        unsafe {
+            write_bytes(ptr, 0u8, 0x1000);
+        }
         new_table
     }
 }

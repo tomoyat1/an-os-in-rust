@@ -128,6 +128,8 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
         pml4e.set_flags(PRESENT_FLAG, false)
     }
 
+    MAPPER.lock().as_mut().unwrap().alloc_page_at(0x1000);
+
     flush_tlb();
 }
 
