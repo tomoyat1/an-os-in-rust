@@ -9,7 +9,7 @@ use crate::mm::malloc;
 use paging::physical;
 use uefi::table::boot::{MemoryDescriptor, MemoryType};
 use x86_64::paging::mapping::Mapper;
-use x86_64::paging::table::{PageEntry, PRESENT_FLAG, RW_FLAG};
+use x86_64::paging::table::{PagingStructEntry, PRESENT_FLAG, RW_FLAG};
 use x86_64::paging::{
     flush_tlb, read_cr3, MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30, MASK_47_30, MASK_47_39,
     MASK_51_12, MASK_51_21, MASK_51_30, PAGING_STRUCTURE_BASE,
@@ -17,19 +17,19 @@ use x86_64::paging::{
 
 extern "C" {
     #[link_name = "boot_pml4"]
-    static mut KERNEL_PML4: [PageEntry; 512];
+    static mut KERNEL_PML4: [PagingStructEntry; 512];
 
     #[link_name = "boot_pdpt"]
-    static mut BOOT_PDPT: [PageEntry; 512];
+    static mut BOOT_PDPT: [PagingStructEntry; 512];
 
     #[link_name = "boot_pdt"]
-    static mut BOOT_PDT: [PageEntry; 512];
+    static mut BOOT_PDT: [PagingStructEntry; 512];
 
     #[link_name = "boot_paging_pdpt"]
-    static mut BOOT_PAGING_PDPT: [PageEntry; 512];
+    static mut BOOT_PAGING_PDPT: [PagingStructEntry; 512];
 
     #[link_name = "boot_paging_pdt"]
-    static mut BOOT_PAGING_PDT: [PageEntry; 512];
+    static mut BOOT_PAGING_PDT: [PagingStructEntry; 512];
 }
 
 static MAPPER: WithSpinLock<Option<Mapper>> = WithSpinLock::new(None);
@@ -64,7 +64,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     unsafe {
         let pdpt = &raw mut BOOT_PAGING_PDPT;
         let pdpt = pdpt as usize - KERNEL_BASE;
-        (*pml4)[idx] = PageEntry::new(0x3, pdpt)
+        (*pml4)[idx] = PagingStructEntry::new(0x3, pdpt)
     }
 
     let pdpt = unsafe { &raw mut BOOT_PAGING_PDPT };
@@ -72,12 +72,12 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     unsafe {
         let pdt = &raw mut BOOT_PAGING_PDT;
         let pdt = pdt as usize - KERNEL_BASE;
-        (*pdpt)[idx] = PageEntry::new(PRESENT_FLAG | RW_FLAG, pdt)
+        (*pdpt)[idx] = PagingStructEntry::new(PRESENT_FLAG | RW_FLAG, pdt)
     }
 
     let pdt = unsafe { &raw mut BOOT_PAGING_PDT };
     let idx = (page_structure_base & MASK_29_21) >> 21;
-    unsafe { (*pdt)[idx] = PageEntry::new(0x83, 0x200000) }
+    unsafe { (*pdt)[idx] = PagingStructEntry::new(0x83, 0x200000) }
 
     flush_tlb();
 
