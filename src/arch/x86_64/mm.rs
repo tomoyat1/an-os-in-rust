@@ -6,13 +6,16 @@ use core::slice::from_raw_parts;
 
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::mm::malloc;
+
+use interface::Arch;
+use native::X86_64;
 use paging::physical;
 use uefi::table::boot::{MemoryDescriptor, MemoryType};
 use x86_64::paging::mapping::Mapper;
 use x86_64::paging::table::{PagingStructEntry, PRESENT_FLAG, RW_FLAG};
 use x86_64::paging::{
-    flush_tlb, read_cr3, MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30, MASK_47_30, MASK_47_39,
-    MASK_51_12, MASK_51_21, MASK_51_30, PAGING_STRUCTURE_BASE,
+    MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30, MASK_47_30, MASK_47_39, MASK_51_12, MASK_51_21,
+    MASK_51_30, PAGING_STRUCTURE_BASE,
 };
 
 extern "C" {
@@ -32,13 +35,14 @@ extern "C" {
     static mut BOOT_PAGING_PDT: [PagingStructEntry; 512];
 }
 
-static MAPPER: WithSpinLock<Option<Mapper>> = WithSpinLock::new(None);
+static MAPPER: WithSpinLock<Option<Mapper<X86_64>>> = WithSpinLock::new(None);
 
 pub const KERNEL_BASE: usize = 0xffff_8000_0000_0000;
 pub const MMIO_BASE: usize = 0xffff_ff00_0000_0000;
 
 /// init_mm() (re)-initializes paging data structures for kernel execution.
 pub fn init_mm(memory_map: &[MemoryDescriptor]) {
+    let arch = X86_64();
     let mut free_blocks = Vec::<(usize, usize)>::new();
 
     for mdesc in memory_map {
@@ -59,7 +63,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
 
     // Map first 2MiB of paging structures to 0xffff_ff80_0020_0000.
     let pml4 = unsafe { &raw mut KERNEL_PML4 };
-    let page_structure_base = PAGING_STRUCTURE_BASE + read_cr3();
+    let page_structure_base = PAGING_STRUCTURE_BASE + arch.paging_structure_base();
     let idx = (page_structure_base & MASK_47_39) >> 39;
     unsafe {
         let pdpt = &raw mut BOOT_PAGING_PDPT;
@@ -79,9 +83,9 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     let idx = (page_structure_base & MASK_29_21) >> 21;
     unsafe { (*pdt)[idx] = PagingStructEntry::new(0x83, 0x200000) }
 
-    flush_tlb();
+    arch.flush_tlb();
 
-    let mut mapper = Mapper::new(page_structure_base, 0x200000, 7, allocator);
+    let mut mapper = Mapper::new(page_structure_base, 0x200000, 7, allocator, arch);
     {
         let mut m = MAPPER.lock();
         *m = Some(mapper)
@@ -122,7 +126,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     }
 
     let pml4 = unsafe { &raw mut KERNEL_PML4 };
-    let page_structure_base = PAGING_STRUCTURE_BASE + read_cr3();
+    let page_structure_base = PAGING_STRUCTURE_BASE + arch.paging_structure_base();
     unsafe {
         let pml4e = &mut (*pml4)[0];
         pml4e.set_flags(PRESENT_FLAG, false)
@@ -130,7 +134,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
 
     MAPPER.lock().as_mut().unwrap().alloc_page_at(0x1000);
 
-    flush_tlb();
+    arch.flush_tlb();
 }
 
 /// phys_addr returns the physical address for `linear_address`.
@@ -142,7 +146,7 @@ pub fn phys_addr(linear_addr: *const u8) -> *const u8 {
         .phys_addr(linear_addr as usize) as *const u8
 }
 
-pub fn mapper() -> WithSpinLockGuard<'static, Option<Mapper>> {
+pub fn mapper() -> WithSpinLockGuard<'static, Option<Mapper<X86_64>>> {
     MAPPER.lock()
 }
 

@@ -1,4 +1,4 @@
-use core::arch::asm;
+extern crate interface;
 
 pub mod mapping;
 pub mod table;
@@ -14,25 +14,3 @@ pub const MASK_29_0: usize = 0x0000_0000_3fff_ffff;
 pub const MASK_20_12: usize = 0x0000_0000_001f_f000;
 pub const MASK_20_0: usize = 0x0000_0000_001f_ffff;
 pub const PAGING_STRUCTURE_BASE: usize = 0xffff_ff80_0000_0000;
-
-pub fn read_cr3() -> usize {
-    let cr3: usize;
-    unsafe {
-        asm!(
-        "mov {tmp}, cr3",
-        tmp = out(reg) cr3
-        );
-    }
-    cr3
-}
-
-/// flush_tlb() flushes the TLB.
-pub fn flush_tlb() {
-    unsafe {
-        asm!(
-        "mov {tmp}, cr3",
-        "mov cr3, {tmp}",
-        tmp = out(reg) _,
-        )
-    }
-}

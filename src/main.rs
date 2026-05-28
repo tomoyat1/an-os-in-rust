@@ -7,6 +7,7 @@
 #![feature(sync_unsafe_cell)]
 extern crate alloc;
 extern crate bootlib;
+extern crate native;
 extern crate paging;
 extern crate rlibc;
 extern crate x86_64;

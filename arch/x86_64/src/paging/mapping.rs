@@ -3,12 +3,13 @@ use crate::paging::table::{PagingStruct, PRESENT_FLAG, PS_FLAG, RW_FLAG};
 
 use core::ptr::write_bytes;
 
+use interface::Arch;
 use paging_common::physical::PageAllocator;
 
 const BOOT_PAGE_TABLE_COUNT: usize = 7;
 
 // TODO: make this a trait if we support architectures other than x86_64.
-pub struct Mapper {
+pub struct Mapper<A: Arch> {
     base: usize,
     length: usize,
     // TODO: Bump style allocation will break with offset mapping.
@@ -16,10 +17,17 @@ pub struct Mapper {
     next: usize,
 
     page_allocator: PageAllocator,
+    arch: A,
 }
 
-impl Mapper {
-    pub fn new(base: usize, length: usize, next: usize, page_allocator: PageAllocator) -> Self {
+impl<A: Arch> Mapper<A> {
+    pub fn new(
+        base: usize,
+        length: usize,
+        next: usize,
+        page_allocator: PageAllocator,
+        a: A,
+    ) -> Self {
         let ptr = (base + BOOT_PAGE_TABLE_COUNT * 0x1000) as *mut u8;
         unsafe {
             write_bytes(ptr, 0u8, length - BOOT_PAGE_TABLE_COUNT * 0x1000);
@@ -29,19 +37,21 @@ impl Mapper {
             length,
             next,
             page_allocator,
+            arch: a,
         }
     }
 
     pub fn map(&mut self, phys_addr: usize, virt_addr: usize) {
         let mut mask = MASK_47_39;
         let mut shift = 39;
-        let mut page_table = (read_cr3() + PAGING_STRUCTURE_BASE) as *mut PagingStruct;
+        let page_table =
+            (self.arch.paging_structure_base() + PAGING_STRUCTURE_BASE) as *mut PagingStruct;
         let mut page_table = unsafe { &mut *page_table };
         for _ in 0..3usize {
             let idx = (virt_addr & mask) >> shift;
             mask >>= 9;
             shift -= 9;
-            let entry = unsafe { (*page_table).get_entry_mut(idx) };
+            let entry = page_table.get_entry_mut(idx);
             page_table = if entry.get_flags(PRESENT_FLAG) == PRESENT_FLAG {
                 unsafe { &mut *(entry.get_virt_addr() as *mut PagingStruct) }
             } else {
@@ -54,10 +64,10 @@ impl Mapper {
             }
         }
         let idx = (virt_addr & MASK_20_12) >> 12;
-        let pte = unsafe { (*page_table).get_entry_mut(idx) };
+        let pte = page_table.get_entry_mut(idx);
         pte.set_addr(phys_addr & MASK_51_12);
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
-        flush_tlb();
+        self.arch.flush_tlb();
     }
 
     pub fn alloc_page_at(&mut self, virt_addr: usize) {
@@ -73,7 +83,8 @@ impl Mapper {
     pub fn phys_addr(&self, virt_addr: usize) -> usize {
         let mut mask = MASK_47_39;
         let mut shift = 39;
-        let mut page_table = (read_cr3() + PAGING_STRUCTURE_BASE) as *mut PagingStruct;
+        let page_table =
+            (self.arch.paging_structure_base() + PAGING_STRUCTURE_BASE) as *mut PagingStruct;
         let mut page_table = unsafe { &mut *page_table };
 
         // Unconditionally traverse once from PML4 to PDPT.
@@ -96,7 +107,7 @@ impl Mapper {
     }
 
     pub fn fork(&mut self, cr3: usize) -> usize {
-        let mut src_pml4 = (cr3 + PAGING_STRUCTURE_BASE) as *mut PagingStruct;
+        let src_pml4 = (cr3 + PAGING_STRUCTURE_BASE) as *mut PagingStruct;
         let src_pml4 = unsafe { &*src_pml4 };
         let dst_pml4 = self.new_table() as *mut PagingStruct;
         let dst_pml4 = unsafe { &mut *dst_pml4 };
@@ -171,4 +182,55 @@ impl Mapper {
         }
         new_table
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use interface::Arch;
+
+    #[derive(Copy, Clone)]
+    struct FakeArch(usize);
+
+    impl Arch for FakeArch {
+        fn paging_structure_base(&self) -> usize {
+            self.0
+        }
+        fn flush_tlb(&self) {}
+    }
+
+    #[test]
+    fn test_new_table() {
+        let allocator = PageAllocator::new();
+        let layout = core::alloc::Layout::from_size_align(0x200000, 0x200000).unwrap();
+        let base: *mut u8 = unsafe { alloc::alloc::alloc(layout) };
+        let fake_native = FakeArch(base as usize);
+        let mut mapper = Mapper::new(base as usize, 0x20000, 0, allocator, fake_native);
+        let first_table = mapper.new_table();
+        assert_eq!(mapper.next, 1, "Next table should be offset 1");
+        assert_eq!(first_table, base as usize, "First table should be at base");
+
+        let second_table = mapper.new_table();
+        assert_eq!(mapper.next, 2, "Next table should be offset 2");
+        assert_eq!(
+            second_table,
+            base as usize + 0x1000,
+            "Second table should be at base + 0x1000"
+        );
+
+        unsafe { alloc::alloc::dealloc(base, layout) };
+    }
+
+    // #[test]
+    // fn test_map() {
+    //     let allocator = PageAllocator::new();
+    //     let layout = core::alloc::Layout::from_size_align(0x200000, 0x200000).unwrap();
+    //     let base: *mut u8 = unsafe { alloc::alloc::alloc(layout) };
+    //     let fake_native = FakeNative(base as usize);
+    //     let mut mapper = Mapper::new(base as usize, 0x20000, 0, allocator, fake_native);
+    //
+    //     let phys_addr = 0xdeadb000usize;
+    //     let virt_addr = phys_addr + 0xffff_8000_0000_0000;
+    //     mapper.map(phys_addr, virt_addr)
+    // }
 }

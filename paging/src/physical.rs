@@ -1,12 +1,5 @@
-#[cfg(not(test))]
 use alloc::collections::BTreeSet;
-#[cfg(test)]
-use std::collections::BTreeSet;
-
-#[cfg(not(test))]
 use alloc::vec::Vec;
-#[cfg(test)]
-use std::vec::Vec;
 
 const PAGE_SIZE_ORDER: usize = 12;
 const PAGE_SIZE: usize = 1 << PAGE_SIZE_ORDER;
@@ -20,7 +13,7 @@ pub struct PageAllocator {
 
 impl PageAllocator {
     pub const fn new() -> Self {
-        let mut pa = PageAllocator {
+        let pa = PageAllocator {
             free_lists: Vec::new(),
         };
         pa

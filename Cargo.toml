@@ -15,10 +15,12 @@ uefi = "=0.29.0"
 bootlib = { path = "./bootlib" }
 paging = { path = "./paging" }
 x86_64 = { path = "./arch/x86_64" }
+native = { path = "./arch/x86_64/native" }
 spin = "0.10.0"
+interface = { path = "./arch/interface" }
 
 [workspace]
-members = ["bootloader", "bootlib", "paging", "arch/x86_64"]
+members = ["bootloader", "bootlib", "paging", "arch/x86_64", "arch/x86_64/native", "arch/interface"]
 
 [profile.dev]
 debug = true
