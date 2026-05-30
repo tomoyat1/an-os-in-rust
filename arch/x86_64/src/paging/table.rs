@@ -32,6 +32,18 @@ pub const GLOBAL_FLAG: usize = 1 << 8;
 /// Page attribute table; determines the memory type used to access the region that the entry controls.
 pub const PAT_FLAG: usize = 1 << 12;
 
+/// All flags
+pub const ALL_FLAGS: usize = PRESENT_FLAG
+    | RW_FLAG
+    | US_FLAG
+    | PWT_FLAG
+    | PCD_FLAG
+    | ACCESSED_FLAG
+    | DIRTY_FLAG
+    | PS_FLAG
+    | GLOBAL_FLAG
+    | PAT_FLAG;
+
 /// A paging structure entry.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]

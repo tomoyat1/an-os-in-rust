@@ -1,5 +1,5 @@
 use super::*;
-use crate::paging::table::{PagingStruct, PRESENT_FLAG, PS_FLAG, RW_FLAG};
+use crate::paging::table::{PagingStruct, ALL_FLAGS, PRESENT_FLAG, PS_FLAG, RW_FLAG};
 
 use core::ptr::write_bytes;
 
@@ -45,7 +45,6 @@ impl<E: Environment + Clone> Mapper<E> {
         let mut mask = MASK_47_39;
         let mut shift = 39;
         let mut page_table = self.environment.paging_structure_base() as *mut PagingStruct<E>;
-        // let mut page_table = unsafe { &mut *page_table };
         for _ in 0..3usize {
             let idx = (virt_addr & mask) >> shift;
             mask >>= 9;
@@ -107,28 +106,27 @@ impl<E: Environment + Clone> Mapper<E> {
 
         // Initialize with PML4E.
         let idx = (virt_addr & mask) >> shift;
-        let (mut entry_addr, mut entry_flags, mut entry_phys) = unsafe {
+        let (mut entry_addr, mut entry_flags) = unsafe {
             let entry = (*page_table).get_entry(idx);
-            (entry.get_addr(), entry.get_flags(!0), entry.get_addr())
+            (entry.get_addr(), entry.get_flags(ALL_FLAGS))
         };
 
         // Traverse maximum 3 times; PML4 -> PDPT -> PD -> PT
         for _ in 0..3usize {
             if entry_flags & PS_FLAG != PS_FLAG {
-                page_table = self.table_for_phys_addr(entry_phys);
+                page_table = self.table_for_phys_addr(entry_addr);
             } else {
                 break;
             }
             mask >>= 9;
             shift -= 9;
             let idx = (virt_addr & mask) >> shift;
-            let (addr, flags, phys_addr) = unsafe {
+            let (addr, flags) = unsafe {
                 let entry = (*page_table).get_entry(idx);
-                (entry.get_addr(), entry.get_flags(!0), entry.get_addr())
+                (entry.get_addr(), entry.get_flags(ALL_FLAGS))
             };
             entry_addr = addr;
             entry_flags = flags;
-            entry_phys = phys_addr;
         }
         let _ = entry_flags;
         entry_addr.wrapping_add(virt_addr & !(0xFFFF_FFFF_FFFF_FFFF - ((1 << shift) - 1)))
@@ -136,66 +134,98 @@ impl<E: Environment + Clone> Mapper<E> {
 
     pub fn fork(&mut self, paging_struct_base: *mut PagingStruct<E>) -> usize {
         let src_pml4 = paging_struct_base;
-        let src_pml4 = unsafe { &*src_pml4 };
         let dst_pml4 = self.new_table();
-        let dst_pml4 = unsafe { &mut *(dst_pml4 as *mut PagingStruct<E>) };
 
         // Shallow copy kernel address space
         for i in 256..512usize {
-            let entry = src_pml4.get_entry(i);
-            if entry.get_flags(PRESENT_FLAG) != PRESENT_FLAG {
+            let (entry_addr, flags) = unsafe {
+                let entry = (*src_pml4).get_entry(i);
+                (entry.get_addr(), entry.get_flags(ALL_FLAGS))
+            };
+            if flags & PRESENT_FLAG != PRESENT_FLAG {
                 continue;
             }
-            *(dst_pml4.get_entry_mut(i)) = entry.clone();
+            unsafe {
+                let dst_entry = (*dst_pml4).get_entry_mut(i);
+                dst_entry.set_addr(entry_addr);
+                dst_entry.set_flags(flags, true);
+            }
         }
         for i in 0..256usize {
-            let entry = src_pml4.get_entry(i);
-            if entry.get_flags(PRESENT_FLAG) != PRESENT_FLAG {
+            let (entry_addr, flags) = unsafe {
+                let entry = (*src_pml4).get_entry(i);
+                (entry.get_addr(), entry.get_flags(ALL_FLAGS))
+            };
+            if flags & PRESENT_FLAG != PRESENT_FLAG {
                 continue;
             }
-            *(dst_pml4.get_entry_mut(i)) = entry.clone();
-            let dst_table = self.new_table();
-            let dst_table = unsafe { &mut *(dst_table as *mut PagingStruct<E>) };
-            dst_pml4.get_entry_mut(i).set_addr(dst_table.phys_addr());
-            let src_table = entry.get_virt_addr() as *mut PagingStruct<E>;
-            let src_table = unsafe { &mut *src_table };
-            self.recursively_clone(src_table, dst_table, 3);
+            let dst_pdpt = self.new_table();
+            unsafe {
+                (*dst_pml4).get_entry_mut(i).set_flags(flags, true);
+                let dst_table_addr = (*dst_pdpt).phys_addr();
+                (*dst_pml4).get_entry_mut(i).set_addr(dst_table_addr)
+            }
+
+            let src_pdpt = unsafe {
+                let entry = (*src_pml4).get_entry(i);
+                let phys_addr = entry.get_addr();
+                self.table_for_phys_addr(phys_addr)
+            };
+            self.recursively_clone(src_pdpt, dst_pdpt, 3);
         }
 
-        dst_pml4.phys_addr()
+        unsafe { (*dst_pml4).phys_addr() }
     }
 
     fn recursively_clone(
         &mut self,
-        src: &mut PagingStruct<E>,
-        dst: &mut PagingStruct<E>,
-        level: usize, // 3: pdpt, 2: pdt, 1: pt
+        src: *mut PagingStruct<E>,
+        dst: *mut PagingStruct<E>,
+        level: usize, // 2: pdpt -> pd, 1: pd -> pt
     ) {
         for i in 0..512usize {
-            let src_entry = src.get_entry_mut(i);
-            let dst_entry = dst.get_entry_mut(i);
             if level == 1 {
-                // src_entry is a pte
-                if src_entry.get_flags(PRESENT_FLAG) != PRESENT_FLAG {
+                // src is a pt
+                let (src_addr, src_flags) = unsafe {
+                    let src_entry = (*src).get_entry(i);
+                    (src_entry.get_addr(), src_entry.get_flags(ALL_FLAGS))
+                };
+                if src_flags & PRESENT_FLAG != PRESENT_FLAG {
                     continue;
                 }
-                *dst_entry = src_entry.clone();
-                dst_entry.set_flags(RW_FLAG, false);
-                src_entry.set_flags(RW_FLAG, false);
+                unsafe {
+                    let dst_entry = (*dst).get_entry_mut(i);
+                    dst_entry.set_addr(src_addr);
+                    dst_entry.set_flags(src_flags, true);
+                    dst_entry.set_flags(RW_FLAG, false)
+                }
+                unsafe {
+                    let src_entry = (*src).get_entry_mut(i);
+                    src_entry.set_flags(RW_FLAG, false);
+                }
             } else {
-                // src_entry is a pdpt or pdt
-                if src_entry.get_flags(PRESENT_FLAG) != PRESENT_FLAG {
+                // src_entry is a pdpte or pde
+                let (src_ent_addr, src_ent_flags) = unsafe {
+                    let src_entry = (*src).get_entry(i);
+                    (src_entry.get_addr(), src_entry.get_flags(ALL_FLAGS))
+                };
+                if src_ent_flags & PRESENT_FLAG != PRESENT_FLAG {
                     continue;
                 }
-                *dst_entry = src_entry.clone();
                 let dst_table = self.new_table();
-                let dst_table = dst_table;
-                let dst_table = unsafe { &mut *(dst_table as *mut PagingStruct<E>) };
-                dst_entry.set_addr(dst_table.phys_addr());
+                unsafe {
+                    let dst_entry = (*dst).get_entry_mut(i);
+                    let dst_table_addr = (*dst_table).phys_addr();
+                    dst_entry.set_addr(dst_table_addr);
+                    dst_entry.set_flags(src_ent_flags, true);
+                    dst_entry.set_flags(RW_FLAG, false)
+                }
 
-                let src_table = src_entry.get_virt_addr();
-                let src_table = src_table as *mut PagingStruct<E>;
-                let src_table = unsafe { &mut *src_table };
+                let src_table = unsafe {
+                    let src_entry = (*src).get_entry(i);
+                    let addr = src_entry.get_addr();
+                    self.table_for_phys_addr(addr)
+                };
                 self.recursively_clone(src_table, dst_table, level - 1);
             }
         }
@@ -276,7 +306,7 @@ mod test {
         let mut mapper = Mapper::new(
             base as *mut PagingStruct<UserlandTest>,
             0x200000,
-            0,
+            1,
             allocator,
             fake_native,
         );
@@ -292,6 +322,8 @@ mod test {
             got_phys_addr, phys_addr,
             "Physical address should match: {got_phys_addr:#x} != {phys_addr:#x}"
         );
+
+        let new_table_base = mapper.fork(base as *mut PagingStruct<UserlandTest>);
 
         unsafe { alloc::alloc::dealloc(base, layout) };
     }
