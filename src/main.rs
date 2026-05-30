@@ -7,10 +7,10 @@
 #![feature(sync_unsafe_cell)]
 extern crate alloc;
 extern crate bootlib;
-extern crate native;
 extern crate paging;
 extern crate rlibc;
 extern crate x86_64;
+extern crate x86_64_bare_metal;
 
 use core::arch::asm;
 use core::fmt::{Debug, Write};
@@ -133,6 +133,7 @@ pub unsafe extern "C" fn some_task() {
     }
 }
 
+#[cfg(not(test))]
 #[panic_handler]
 /// panic() handles panics!()'s in the kernel. These are called "kernel panic"s.
 fn panic(info: &PanicInfo) -> ! {

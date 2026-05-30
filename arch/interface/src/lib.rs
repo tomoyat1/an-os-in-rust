@@ -1,7 +1,9 @@
 #![no_std]
 
-pub trait Arch {
-    fn paging_structure_base(&self) -> usize;
+pub trait Environment {
+    const PAGING_STRUCTURE_BASE: usize;
+
+    fn paging_structure_base(&self) -> *mut u8;
 
     fn flush_tlb(&self);
 }

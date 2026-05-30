@@ -1,12 +1,16 @@
 #![no_std]
-use core::arch::asm;
 extern crate interface;
-use interface::Arch;
+extern crate x86_64;
+
+use core::arch::asm;
+use interface::Environment;
 
 #[derive(Copy, Clone)]
-pub struct X86_64();
-impl Arch for X86_64 {
-    fn paging_structure_base(&self) -> usize {
+pub struct X86_64BareMetal();
+impl Environment for X86_64BareMetal {
+    const PAGING_STRUCTURE_BASE: usize = x86_64::paging::PAGING_STRUCTURE_BASE;
+
+    fn paging_structure_base(&self) -> *mut u8 {
         let cr3: usize;
         unsafe {
             asm!(
@@ -14,7 +18,7 @@ impl Arch for X86_64 {
             tmp = out(reg) cr3
             );
         }
-        cr3
+        (cr3 + Self::PAGING_STRUCTURE_BASE) as *mut u8
     }
 
     /// flush_tlb() flushes the TLB.
