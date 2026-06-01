@@ -110,6 +110,6 @@ impl<'a, E: Environment + Clone> PagingStruct<E> {
     }
 
     pub fn phys_addr(&self) -> usize {
-        (self as *const PagingStruct<E>).expose_provenance() - E::PAGING_STRUCTURE_BASE
+        self as *const PagingStruct<E> as usize - E::PAGING_STRUCTURE_BASE
     }
 }

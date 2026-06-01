@@ -8,6 +8,35 @@ use paging_common::physical::PageAllocator;
 
 const BOOT_PAGE_TABLE_COUNT: usize = 7;
 
+trait PagingLevel {
+    const MASK: usize;
+    const SHIFT: usize;
+}
+
+struct PML4;
+impl PagingLevel for PML4 {
+    const MASK: usize = MASK_47_39;
+    const SHIFT: usize = 39;
+}
+
+struct PDPT;
+impl PagingLevel for PDPT {
+    const MASK: usize = MASK_38_30;
+    const SHIFT: usize = 30;
+}
+
+struct PD;
+impl PagingLevel for PD {
+    const MASK: usize = MASK_29_21;
+    const SHIFT: usize = 21;
+}
+
+struct PT;
+impl PagingLevel for PT {
+    const MASK: usize = MASK_20_12;
+    const SHIFT: usize = 12;
+}
+
 // TODO: make this a trait if we support architectures other than x86_64.
 pub struct Mapper<E: Environment + Clone> {
     base: *mut PagingStruct<E>,
@@ -42,41 +71,14 @@ impl<E: Environment + Clone> Mapper<E> {
     }
 
     pub fn map(&mut self, phys_addr: usize, virt_addr: usize) {
-        let mut mask = MASK_47_39;
-        let mut shift = 39;
-        let mut page_table = self.environment.paging_structure_base() as *mut PagingStruct<E>;
-        for _ in 0..3usize {
-            let idx = (virt_addr & mask) >> shift;
-            mask >>= 9;
-            shift -= 9;
+        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct<E>;
+        let (pdpt, _) = self.walk_or_create_table::<PML4>(pml4, virt_addr);
+        let (pd, _) = self.walk_or_create_table::<PDPT>(pdpt, virt_addr);
+        let (pt, _) = self.walk_or_create_table::<PD>(pd, virt_addr);
 
-            let (present, next_virt) = unsafe {
-                let entry = (*page_table).get_entry(idx);
-                (
-                    entry.get_flags(PRESENT_FLAG) == PRESENT_FLAG,
-                    entry.get_virt_addr(),
-                )
-            };
-            let next_ptr = if present {
-                next_virt as *mut PagingStruct<E>
-            } else {
-                // TODO: if remaining page count <=3, extend page table region.
-                let new_table_ptr = self.new_table();
-                let new_phys = unsafe { (*new_table_ptr).phys_addr() };
-
-                unsafe {
-                    let entry = (*page_table).get_entry_mut(idx);
-                    entry.set_addr(new_phys);
-                    entry.set_flags(PRESENT_FLAG | RW_FLAG, true);
-                }
-                new_table_ptr
-            };
-
-            page_table = next_ptr;
-        }
-        let idx = (virt_addr & MASK_20_12) >> 12;
+        let idx = (virt_addr & PT::MASK) >> PT::SHIFT;
         unsafe {
-            let pte = (*page_table).get_entry_mut(idx);
+            let pte = (*pt).get_entry_mut(idx);
             pte.set_addr(phys_addr & MASK_51_12);
             pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
         }
@@ -93,43 +95,33 @@ impl<E: Environment + Clone> Mapper<E> {
         }
     }
 
-    pub fn phys_addr(&self, virt_addr: usize) -> usize {
-        let mut mask = MASK_47_39;
-        let mut shift = 39;
-
-        // Start with PML4.
-        let mut page_table = unsafe {
+    pub fn phys_addr(&self, virt_addr: usize) -> Option<usize> {
+        let pml4 = unsafe {
             self.environment
                 .paging_structure_base()
                 .add(E::PAGING_STRUCTURE_BASE)
         } as *const PagingStruct<E>;
 
-        // Initialize with PML4E.
-        let idx = (virt_addr & mask) >> shift;
-        let (mut entry_addr, mut entry_flags) = unsafe {
-            let entry = (*page_table).get_entry(idx);
-            (entry.get_addr(), entry.get_flags(ALL_FLAGS))
-        };
-
-        // Traverse maximum 3 times; PML4 -> PDPT -> PD -> PT
-        for _ in 0..3usize {
-            if entry_flags & PS_FLAG != PS_FLAG {
-                page_table = self.table_for_phys_addr(entry_addr);
-            } else {
-                break;
+        let (pdpt, _) = self.walk::<PML4>(pml4, virt_addr)?;
+        let pdpt = self.table_for_phys_addr(pdpt);
+        let (pd, pdpt_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
+        let pd = self.table_for_phys_addr(pd);
+        if pdpt_flags & PS_FLAG == PS_FLAG {
+            unsafe {
+                return Some((*pd).phys_addr() | (virt_addr & ((1 << PDPT::SHIFT) - 1)));
             }
-            mask >>= 9;
-            shift -= 9;
-            let idx = (virt_addr & mask) >> shift;
-            let (addr, flags) = unsafe {
-                let entry = (*page_table).get_entry(idx);
-                (entry.get_addr(), entry.get_flags(ALL_FLAGS))
-            };
-            entry_addr = addr;
-            entry_flags = flags;
         }
-        let _ = entry_flags;
-        entry_addr.wrapping_add(virt_addr & !(0xFFFF_FFFF_FFFF_FFFF - ((1 << shift) - 1)))
+
+        let (pt, pd_flags) = self.walk::<PD>(pd, virt_addr)?;
+        let pt = self.table_for_phys_addr(pt);
+        if pd_flags & PS_FLAG == PS_FLAG {
+            unsafe {
+                return Some((*pt).phys_addr() | (virt_addr & ((1 << PD::SHIFT) - 1)));
+            }
+        }
+
+        let (leaf, _) = self.walk::<PT>(pt, virt_addr)?;
+        Some(leaf | (virt_addr & ((1 << PT::SHIFT) - 1)))
     }
 
     pub fn fork(&mut self, paging_struct_base: *mut PagingStruct<E>) -> usize {
@@ -244,6 +236,53 @@ impl<E: Environment + Clone> Mapper<E> {
             self.base.add(idx)
         }
     }
+
+    /// Walk the paging structure of type `L` to get the entry of `virt_addr`.
+    /// If the virtual address is not mapped, returns `None`.
+    /// Returns the **physical address** of the resolved paging structure.
+    fn walk<L: PagingLevel>(
+        &self,
+        table: *const PagingStruct<E>,
+        virt_addr: usize,
+    ) -> Option<(usize, usize)> {
+        let idx = (virt_addr & L::MASK) >> L::SHIFT;
+        let (addr, flags) = unsafe {
+            let entry = (*table).get_entry(idx);
+            (entry.get_addr(), entry.get_flags(ALL_FLAGS))
+        };
+        match flags & PRESENT_FLAG {
+            PRESENT_FLAG => Some((addr, flags)),
+            _ => None,
+        }
+    }
+
+    /// Walk the paging structure of type `L` to get the entry of `virt_addr`, or
+    /// create a new paging structure if it doesn't exist.
+    /// Returns the **physical address** of the resolved or newly created paging structure.
+    fn walk_or_create_table<L: PagingLevel>(
+        &mut self,
+        table: *mut PagingStruct<E>,
+        virt_addr: usize,
+    ) -> (*mut PagingStruct<E>, usize) {
+        match self.walk::<L>(table, virt_addr) {
+            Some((next_table, flags)) => {
+                let next_table = self.table_for_phys_addr(next_table);
+                (next_table, flags)
+            }
+            None => {
+                // Table does not exist, create new table.
+                let idx = (virt_addr & L::MASK) >> L::SHIFT;
+                let next_table = self.new_table();
+                let flags = PRESENT_FLAG | RW_FLAG;
+                unsafe {
+                    let entry = (*table).get_entry_mut(idx);
+                    entry.set_addr((*next_table).phys_addr());
+                    entry.set_flags(flags, true);
+                }
+                (next_table, flags)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -317,7 +356,7 @@ mod test {
         let virt_addr = phys_addr + PAGING_STRUCTURE_BASE;
         mapper.map(phys_addr, virt_addr);
 
-        let got_phys_addr = mapper.phys_addr(virt_addr);
+        let got_phys_addr = mapper.phys_addr(virt_addr).expect("Mapping should exist");
         assert_eq!(
             got_phys_addr, phys_addr,
             "Physical address should match: {got_phys_addr:#x} != {phys_addr:#x}"
