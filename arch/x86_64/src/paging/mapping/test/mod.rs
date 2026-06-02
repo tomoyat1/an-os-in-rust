@@ -1,4 +1,5 @@
 mod fork;
+mod map;
 mod new_table;
 mod phys_addr;
 

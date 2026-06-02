@@ -119,21 +119,21 @@ impl<E: Environment + Clone> Mapper<E> {
 
         let (pdpt, _) = self.walk::<PML4>(pml4, virt_addr)?;
         let pdpt = self.table_for_phys_addr(pdpt);
-        let (pd, pdpt_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
-        let pd = self.table_for_phys_addr(pd);
-        if pdpt_flags & PS_FLAG == PS_FLAG {
+        let (pdpte_addr, pdpte_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
+        if pdpte_flags & PS_FLAG == PS_FLAG {
             unsafe {
-                return Some((*pd).phys_addr() | (virt_addr & ((1 << PDPT::SHIFT) - 1)));
+                return Some(pdpte_addr | (virt_addr & ((1 << PDPT::SHIFT) - 1)));
             }
         }
+        let pd = self.table_for_phys_addr(pdpte_addr);
 
-        let (pt, pd_flags) = self.walk::<PD>(pd, virt_addr)?;
-        let pt = self.table_for_phys_addr(pt);
-        if pd_flags & PS_FLAG == PS_FLAG {
+        let (pde, pde_flags) = self.walk::<PD>(pd, virt_addr)?;
+        if pde_flags & PS_FLAG == PS_FLAG {
             unsafe {
-                return Some((*pt).phys_addr() | (virt_addr & ((1 << PD::SHIFT) - 1)));
+                return Some(pde | (virt_addr & ((1 << PD::SHIFT) - 1)));
             }
         }
+        let pt = self.table_for_phys_addr(pde);
 
         let (leaf, _) = self.walk::<PT>(pt, virt_addr)?;
         Some(leaf | (virt_addr & ((1 << PT::SHIFT) - 1)))
