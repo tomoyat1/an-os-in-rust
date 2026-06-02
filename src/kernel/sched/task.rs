@@ -14,6 +14,7 @@ use core::cmp::Ordering;
 use core::fmt::Formatter;
 use core::mem::{size_of, ManuallyDrop};
 use core::{fmt, ptr};
+use interface::Environment;
 use x86_64::paging::table::PagingStruct;
 use x86_64_bare_metal::X86_64BareMetal;
 
@@ -147,10 +148,10 @@ impl TaskList {
             let ptr = alloc(layout) as *mut Task;
 
             // TODO: create separate address space by going through the Mapper.
-            let cr3 = mapper()
-                .as_mut()
-                .unwrap()
-                .fork(current_task.info.registers.cr3 as *mut PagingStruct<X86_64BareMetal>);
+            let cr3 = mapper().as_mut().unwrap().fork(
+                (current_task.info.registers.cr3 + X86_64BareMetal::PAGING_STRUCTURE_BASE)
+                    as *mut PagingStruct<X86_64BareMetal>,
+            );
             (*ptr).info.registers = Registers {
                 stack_top: 0,
 

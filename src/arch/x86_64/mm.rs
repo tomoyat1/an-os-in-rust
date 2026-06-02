@@ -63,7 +63,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
 
     // Map first 2MiB of paging structures to 0xffff_ff80_0020_0000.
     let pml4 = unsafe { &raw mut KERNEL_PML4 };
-    let page_structure_base = PAGING_STRUCTURE_BASE + arch.paging_structure_base() as usize;
+    let page_structure_base = arch.paging_structure_base() as usize;
     let idx = (page_structure_base & MASK_47_39) >> 39;
     unsafe {
         let pdpt = &raw mut BOOT_PAGING_PDPT;
@@ -132,7 +132,6 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     }
 
     let pml4 = unsafe { &raw mut KERNEL_PML4 };
-    let page_structure_base = unsafe { arch.paging_structure_base().add(PAGING_STRUCTURE_BASE) };
     unsafe {
         let pml4e = &mut (*pml4)[0];
         pml4e.set_flags(PRESENT_FLAG, false)
@@ -144,12 +143,8 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
 }
 
 /// phys_addr returns the physical address for `linear_address`.
-pub fn phys_addr(linear_addr: *const u8) -> *const u8 {
-    MAPPER
-        .lock()
-        .as_mut()
-        .unwrap()
-        .phys_addr(linear_addr as usize) as *const u8
+pub fn phys_addr(linear_addr: usize) -> Option<usize> {
+    MAPPER.lock().as_mut().unwrap().phys_addr(linear_addr)
 }
 
 pub fn mapper() -> WithSpinLockGuard<'static, Option<Mapper<X86_64BareMetal>>> {

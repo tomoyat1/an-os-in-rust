@@ -41,9 +41,20 @@ impl PagingLevel for PT {
     const SHIFT: usize = 12;
 }
 
+pub struct PagingStructBase<E: Environment + Clone>(*mut PagingStruct<E>);
+
+unsafe impl<E: Environment + Clone> Send for PagingStructBase<E> {}
+unsafe impl<E: Environment + Clone> Sync for PagingStructBase<E> {}
+
+impl<E: Environment + Clone> From<&PagingStructBase<E>> for usize {
+    fn from(base: &PagingStructBase<E>) -> usize {
+        base.0 as usize
+    }
+}
+
 // TODO: make this a trait if we support architectures other than x86_64.
 pub struct Mapper<E: Environment + Clone> {
-    base: *mut PagingStruct<E>,
+    base: PagingStructBase<E>,
     length: usize,
     // TODO: Bump style allocation will break with offset mapping.
     //       Use better allocation method
@@ -66,7 +77,7 @@ impl<E: Environment + Clone> Mapper<E> {
             write_bytes(ptr, 0u8, length - BOOT_PAGE_TABLE_COUNT * 0x1000);
         }
         Mapper {
-            base,
+            base: PagingStructBase(base),
             length,
             next,
             page_allocator,
@@ -220,16 +231,16 @@ impl<E: Environment + Clone> Mapper<E> {
     }
 
     fn new_table(&mut self) -> *mut PagingStruct<E> {
-        let new_table = unsafe { self.base.add(self.next) };
+        let new_table = unsafe { self.base.0.add(self.next) };
         self.next += 1;
         new_table
     }
 
     fn table_for_phys_addr(&self, phys_addr: usize) -> *mut PagingStruct<E> {
         unsafe {
-            let idx = (E::PAGING_STRUCTURE_BASE + phys_addr - self.base as usize)
+            let idx = (E::PAGING_STRUCTURE_BASE + phys_addr - usize::from(&self.base))
                 / size_of::<PagingStruct<E>>();
-            self.base.add(idx)
+            self.base.0.add(idx)
         }
     }
 

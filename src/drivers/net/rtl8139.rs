@@ -153,9 +153,12 @@ impl RTL8139 {
         };
 
         // Init recv buffer
-        let rx_buf_addr = rtl8139.rx_buf.buf.as_ptr();
-        let rx_buf_addr = mm::phys_addr(rx_buf_addr);
-        unsafe { rtl8139.outl(REG_RBSTART, rx_buf_addr as u32) }
+        let rx_buf_virt_addr = rtl8139.rx_buf.buf.as_ptr() as usize;
+        let rx_buf_addr = mm::phys_addr(rx_buf_virt_addr);
+        match rx_buf_addr {
+            Some(rx_buf_addr) => unsafe { rtl8139.outl(REG_RBSTART, rx_buf_addr as u32) },
+            None => panic!("rtl8139: unmapped rx_buf: {:x}", rx_buf_virt_addr),
+        }
 
         // Receive configuration
         // Accept
