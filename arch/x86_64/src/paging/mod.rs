@@ -14,3 +14,19 @@ pub const MASK_29_0: usize = 0x0000_0000_3fff_ffff;
 pub const MASK_20_12: usize = 0x0000_0000_001f_f000;
 pub const MASK_20_0: usize = 0x0000_0000_001f_ffff;
 pub const PAGING_STRUCTURE_BASE: usize = 0xffff_ff80_0000_0000;
+
+enum PageSize {
+    Normal,
+    Huge,
+    Gigantic,
+}
+
+impl Into<usize> for PageSize {
+    fn into(self) -> usize {
+        match self {
+            PageSize::Normal => 0x1000,
+            PageSize::Huge => 0x200000,
+            PageSize::Gigantic => 0x40000000,
+        }
+    }
+}

@@ -1,8 +1,9 @@
 use super::*;
 use crate::paging::table::{PagingStruct, ALL_FLAGS, PRESENT_FLAG, PS_FLAG, RW_FLAG};
+use alloc::collections::BTreeMap;
 
 use core::ptr::write_bytes;
-
+use core::sync::atomic::{AtomicUsize, Ordering};
 use interface::Environment;
 use paging_common::physical::PageAllocator;
 
@@ -52,6 +53,12 @@ impl<E: Environment + Clone> From<&PagingStructBase<E>> for usize {
     }
 }
 
+struct MappedPage {
+    phys_addr: usize,
+    size: PageSize,
+    refs: AtomicUsize,
+}
+
 // TODO: make this a trait if we support architectures other than x86_64.
 pub struct Mapper<E: Environment + Clone> {
     base: PagingStructBase<E>,
@@ -59,6 +66,9 @@ pub struct Mapper<E: Environment + Clone> {
     // TODO: Bump style allocation will break with offset mapping.
     //       Use better allocation method
     next: usize,
+
+    // Contains representations of mapped physical pages, _only for userland half_.
+    mapped_pages: BTreeMap<usize, MappedPage>,
 
     page_allocator: PageAllocator,
     environment: E,
@@ -80,6 +90,7 @@ impl<E: Environment + Clone> Mapper<E> {
             base: PagingStructBase(base),
             length,
             next,
+            mapped_pages: BTreeMap::new(),
             page_allocator,
             environment,
         }
@@ -96,6 +107,16 @@ impl<E: Environment + Clone> Mapper<E> {
             let pte = (*pt).get_entry_mut(idx);
             pte.set_addr(phys_addr & MASK_51_12);
             pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
+        }
+        if (virt_addr >> 51) == 0 {
+            self.mapped_pages.insert(
+                phys_addr,
+                MappedPage {
+                    phys_addr,
+                    size: PageSize::Normal,
+                    refs: AtomicUsize::new(1),
+                },
+            );
         }
         self.environment.flush_tlb();
     }
@@ -135,8 +156,8 @@ impl<E: Environment + Clone> Mapper<E> {
         }
         let pt = self.table_for_phys_addr(pde);
 
-        let (leaf, _) = self.walk::<PT>(pt, virt_addr)?;
-        Some(leaf | (virt_addr & ((1 << PT::SHIFT) - 1)))
+        let (page, _) = self.walk::<PT>(pt, virt_addr)?;
+        Some(page | (virt_addr & ((1 << PT::SHIFT) - 1)))
     }
 
     pub fn fork(&mut self, paging_struct_base: *mut PagingStruct<E>) -> usize {
@@ -188,7 +209,7 @@ impl<E: Environment + Clone> Mapper<E> {
         &mut self,
         src: *mut PagingStruct<E>,
         dst: *mut PagingStruct<E>,
-        level: usize, // 2: pdpt -> pd, 1: pd -> pt
+        level: usize, // 3: pdpt, 2: pd, 1: pt
     ) {
         for i in 0..512usize {
             let (src_addr, src_flags) = unsafe {
@@ -210,6 +231,10 @@ impl<E: Environment + Clone> Mapper<E> {
                     let src_entry = (*src).get_entry_mut(i);
                     src_entry.set_flags(RW_FLAG, false);
                 }
+                let mp = self.mapped_pages.get_mut(&src_addr).expect(
+                    "MappedPage for physical page should have been created when getting mapped",
+                );
+                mp.refs.fetch_add(1, Ordering::Release);
             } else {
                 // src_entry is a pdpte or pde with PS == 0
                 if src_flags & PRESENT_FLAG != PRESENT_FLAG {

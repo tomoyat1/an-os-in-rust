@@ -17,8 +17,8 @@ fn test_fork() {
         fake_native,
     );
 
-    let phys_addr = 0x0000_beefusize;
-    let virt_addr = 0x0000_0000_dead_beefusize;
+    let phys_addr = 0x0000_b000usize;
+    let virt_addr = 0x0000_0000_dead_b000usize;
 
     let pml4_idx = (virt_addr & MASK_47_39) >> 39;
     let pdpt_idx = (virt_addr & MASK_38_30) >> 30;
@@ -48,6 +48,15 @@ fn test_fork() {
         pte.set_addr(phys_addr & MASK_51_12);
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
     }
+
+    mapper.mapped_pages.insert(
+        phys_addr,
+        MappedPage {
+            phys_addr,
+            size: PageSize::Normal,
+            refs: AtomicUsize::new(1),
+        },
+    );
 
     let new_table_base = mapper.fork(src_pml4);
     let new_pml4 = mapper.table_for_phys_addr(new_table_base);
@@ -137,6 +146,13 @@ fn test_fork() {
         src_leaf_flags & RW_FLAG,
         0,
         "Src leaf PTE must have RW cleared (COW)"
+    );
+
+    let mp = mapper.mapped_pages.get(&phys_addr).unwrap();
+    let got_refs = mp.refs.load(Ordering::Relaxed);
+    assert_eq!(
+        got_refs, 2,
+        "Page ref count must be incremented, {got_refs:} == 2"
     );
 
     unsafe { alloc::alloc::dealloc(base, layout) };
