@@ -1,8 +1,11 @@
 use super::*;
-use crate::paging::table::{PagingStruct, ALL_FLAGS, PRESENT_FLAG, PS_FLAG, RW_FLAG};
+use crate::paging::table::{
+    PagingStruct, PagingStructEntry, ALL_FLAGS, PRESENT_FLAG, PS_FLAG, RW_FLAG,
+};
 use alloc::collections::BTreeMap;
 
 use core::ptr::write_bytes;
+use core::sync::atomic::Ordering::SeqCst;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use interface::Environment;
 use paging_common::physical::PageAllocator;
@@ -16,6 +19,10 @@ const BOOT_PAGE_TABLE_COUNT: usize = 7;
 trait PagingLevel {
     const MASK: usize;
     const SHIFT: usize;
+
+    fn entry_idx(virt_addr: usize) -> usize {
+        (virt_addr & Self::MASK) >> Self::SHIFT
+    }
 }
 
 struct PML4;
@@ -42,12 +49,17 @@ impl PagingLevel for PT {
     const SHIFT: usize = 12;
 }
 
-pub struct PagingStructBase<E: Environment + Clone>(*mut PagingStruct<E>);
+pub struct PagingStructBase<E>(*mut PagingStruct<E>)
+where
+    E: Environment + Clone + Default;
 
-unsafe impl<E: Environment + Clone> Send for PagingStructBase<E> {}
-unsafe impl<E: Environment + Clone> Sync for PagingStructBase<E> {}
+unsafe impl<E> Send for PagingStructBase<E> where E: Environment + Clone + Default {}
+unsafe impl<E> Sync for PagingStructBase<E> where E: Environment + Clone + Default {}
 
-impl<E: Environment + Clone> From<&PagingStructBase<E>> for usize {
+impl<E> From<&PagingStructBase<E>> for usize
+where
+    E: Environment + Clone + Default,
+{
     fn from(base: &PagingStructBase<E>) -> usize {
         base.0 as usize
     }
@@ -60,7 +72,10 @@ struct MappedPage {
 }
 
 // TODO: make this a trait if we support architectures other than x86_64.
-pub struct Mapper<E: Environment + Clone> {
+pub struct Mapper<E>
+where
+    E: Environment + Clone + Default,
+{
     base: PagingStructBase<E>,
     length: usize,
     // TODO: Bump style allocation will break with offset mapping.
@@ -74,7 +89,10 @@ pub struct Mapper<E: Environment + Clone> {
     environment: E,
 }
 
-impl<E: Environment + Clone> Mapper<E> {
+impl<E> Mapper<E>
+where
+    E: Environment + Clone + Default,
+{
     pub fn new(
         base: *mut PagingStruct<E>,
         length: usize,
@@ -96,7 +114,7 @@ impl<E: Environment + Clone> Mapper<E> {
         }
     }
 
-    pub fn map(&mut self, phys_addr: usize, virt_addr: usize) {
+    fn map(&mut self, phys_addr: usize, virt_addr: usize) {
         let pml4 = self.environment.paging_structure_base() as *mut PagingStruct<E>;
         let (pdpt, _) = self.walk_or_create_table::<PML4>(pml4, virt_addr);
         let (pd, _) = self.walk_or_create_table::<PDPT>(pdpt, virt_addr);
@@ -121,6 +139,104 @@ impl<E: Environment + Clone> Mapper<E> {
         self.environment.flush_tlb();
     }
 
+    fn unmap(&mut self, virt_addr: usize) -> Option<()> {
+        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct<E>;
+        let (pml4e_addr, _) = self.walk::<PML4>(pml4, virt_addr)?;
+        let pdpt = self.table_for_phys_addr(pml4e_addr);
+        let (pdpte_addr, pdpte_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
+        if pdpte_flags & PS_FLAG == PS_FLAG {
+            const MASK: usize = (1 << 30) - 1;
+            assert_eq!(
+                virt_addr & MASK,
+                0,
+                "Virtual address must be 1 GiB multiple when unmapping gigantic page."
+            );
+            unsafe {
+                let idx = PDPT::entry_idx(virt_addr);
+                let entry = (*pdpt).get_entry_mut(idx);
+                *entry = PagingStructEntry::<E>::default();
+            }
+
+            let phys_page = self
+                .mapped_pages
+                .get_mut(&pdpte_addr)
+                .expect("Mapped pages should be in mapped_pages")
+                as *mut MappedPage;
+            // SAFETY: We either dereference the pointer and decrement the ref count or we remove
+            //         the MappedPage, but not both.
+            unsafe {
+                if (*phys_page).refs.load(SeqCst) > 1 {
+                    (*phys_page).refs.fetch_sub(1, SeqCst);
+                } else {
+                    self.mapped_pages.remove(&pdpte_addr);
+                }
+            }
+
+            return Some(());
+        }
+        let pd = self.table_for_phys_addr(pdpte_addr);
+        let (pde_addr, pde_flags) = self.walk::<PD>(pd, virt_addr)?;
+        if pde_flags & PS_FLAG == PS_FLAG {
+            const MASK: usize = (1 << 21) - 1;
+            assert_eq!(
+                virt_addr & MASK,
+                0,
+                "Virtual address must be 2 MiB multiple when unmapping huge page."
+            );
+            unsafe {
+                let idx = PD::entry_idx(virt_addr);
+                let entry = (*pd).get_entry_mut(idx);
+                *entry = PagingStructEntry::<E>::default();
+            }
+
+            let phys_page = self
+                .mapped_pages
+                .get_mut(&pde_addr)
+                .expect("Mapped pages should be in mapped_pages")
+                as *mut MappedPage;
+            // SAFETY: We either dereference the pointer and decrement the ref count or we remove
+            //         the MappedPage, but not both.
+            unsafe {
+                if (*phys_page).refs.load(SeqCst) > 1 {
+                    (*phys_page).refs.fetch_sub(1, SeqCst);
+                } else {
+                    self.mapped_pages.remove(&pde_addr);
+                }
+            }
+
+            return Some(());
+        }
+        let pt = self.table_for_phys_addr(pde_addr);
+        let (pte_addr, _) = self.walk::<PT>(pt, virt_addr)?;
+        unsafe {
+            let idx = PT::entry_idx(virt_addr);
+            let entry = (*pt).get_entry_mut(idx);
+            *entry = PagingStructEntry::<E>::default();
+        }
+
+        let phys_page =
+            self.mapped_pages
+                .get_mut(&pte_addr)
+                .expect("Mapped pages should be in mapped_pages") as *mut MappedPage;
+        // SAFETY: We either dereference the pointer and decrement the ref count or we remove
+        //         the MappedPage, but not both.
+        unsafe {
+            if (*phys_page).refs.load(SeqCst) > 1 {
+                (*phys_page).refs.fetch_sub(1, SeqCst);
+            } else {
+                let _ = self
+                    .mapped_pages
+                    .remove(&pte_addr)
+                    .expect("Removed MappedPage must have been in mapped_pages");
+            }
+        }
+
+        Some(())
+
+        // TODO: Garbage collection of no longer used paging structures.
+        //       This only has meaning once we have memory reclamation in Mapper.
+    }
+
     pub fn alloc_page_at(&mut self, virt_addr: usize) {
         let phys_addr = self.page_allocator.allocate(12);
         match phys_addr {
@@ -131,6 +247,11 @@ impl<E: Environment + Clone> Mapper<E> {
         }
     }
 
+    pub fn map_mmio(&mut self, phys_addr: usize) {
+        let virt_addr = phys_addr + MMIO_BASE;
+        self.map(phys_addr, virt_addr);
+    }
+
     pub fn phys_addr(&self, virt_addr: usize) -> Option<usize> {
         let pml4 = unsafe {
             self.environment
@@ -138,23 +259,19 @@ impl<E: Environment + Clone> Mapper<E> {
                 .add(E::PAGING_STRUCTURE_BASE)
         } as *const PagingStruct<E>;
 
-        let (pdpt, _) = self.walk::<PML4>(pml4, virt_addr)?;
-        let pdpt = self.table_for_phys_addr(pdpt);
+        let (pml4e_addr, _) = self.walk::<PML4>(pml4, virt_addr)?;
+        let pdpt = self.table_for_phys_addr(pml4e_addr);
         let (pdpte_addr, pdpte_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
         if pdpte_flags & PS_FLAG == PS_FLAG {
-            unsafe {
-                return Some(pdpte_addr | (virt_addr & ((1 << PDPT::SHIFT) - 1)));
-            }
+            return Some(pdpte_addr | (virt_addr & ((1 << PDPT::SHIFT) - 1)));
         }
         let pd = self.table_for_phys_addr(pdpte_addr);
 
-        let (pde, pde_flags) = self.walk::<PD>(pd, virt_addr)?;
+        let (pde_addr, pde_flags) = self.walk::<PD>(pd, virt_addr)?;
         if pde_flags & PS_FLAG == PS_FLAG {
-            unsafe {
-                return Some(pde | (virt_addr & ((1 << PD::SHIFT) - 1)));
-            }
+            return Some(pde_addr | (virt_addr & ((1 << PD::SHIFT) - 1)));
         }
-        let pt = self.table_for_phys_addr(pde);
+        let pt = self.table_for_phys_addr(pde_addr);
 
         let (page, _) = self.walk::<PT>(pt, virt_addr)?;
         Some(page | (virt_addr & ((1 << PT::SHIFT) - 1)))
@@ -199,7 +316,7 @@ impl<E: Environment + Clone> Mapper<E> {
                 let phys_addr = entry.get_addr();
                 self.table_for_phys_addr(phys_addr)
             };
-            self.recursively_clone(src_pdpt, dst_pdpt, 3);
+            self.recursively_clone(src_pdpt, dst_pdpt, 3, i << 39);
         }
 
         unsafe { (*dst_pml4).phys_addr() }
@@ -210,12 +327,20 @@ impl<E: Environment + Clone> Mapper<E> {
         src: *mut PagingStruct<E>,
         dst: *mut PagingStruct<E>,
         level: usize, // 3: pdpt, 2: pd, 1: pt
+        virt_addr: usize,
     ) {
         for i in 0..512usize {
             let (src_addr, src_flags) = unsafe {
                 let src_entry = (*src).get_entry(i);
                 (src_entry.get_addr(), src_entry.get_flags(ALL_FLAGS))
             };
+            let shift = match level {
+                3 => 30usize,
+                2 => 21usize,
+                1 => 12usize,
+                _ => unreachable!(),
+            };
+            let virt_addr = virt_addr | (i << shift);
             if level == 1 || src_flags & PS_FLAG == PS_FLAG {
                 // src is a pt, or a pdpt / pd with PS == 1
                 if src_flags & PRESENT_FLAG != PRESENT_FLAG {
@@ -250,7 +375,7 @@ impl<E: Environment + Clone> Mapper<E> {
                 }
 
                 let src_table = self.table_for_phys_addr(src_addr);
-                self.recursively_clone(src_table, dst_table, level - 1);
+                self.recursively_clone(src_table, dst_table, level - 1, virt_addr);
             }
         }
     }
@@ -277,7 +402,7 @@ impl<E: Environment + Clone> Mapper<E> {
         table: *const PagingStruct<E>,
         virt_addr: usize,
     ) -> Option<(usize, usize)> {
-        let idx = (virt_addr & L::MASK) >> L::SHIFT;
+        let idx = L::entry_idx(virt_addr);
         let (addr, flags) = unsafe {
             let entry = (*table).get_entry(idx);
             (entry.get_addr(), entry.get_flags(ALL_FLAGS))
@@ -303,7 +428,7 @@ impl<E: Environment + Clone> Mapper<E> {
             }
             None => {
                 // Table does not exist, create new table.
-                let idx = (virt_addr & L::MASK) >> L::SHIFT;
+                let idx = L::entry_idx(virt_addr);
                 let next_table = self.new_table();
                 let flags = PRESENT_FLAG | RW_FLAG;
                 unsafe {

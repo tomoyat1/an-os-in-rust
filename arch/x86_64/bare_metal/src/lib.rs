@@ -5,7 +5,7 @@ extern crate x86_64;
 use core::arch::asm;
 use interface::Environment;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct X86_64BareMetal();
 impl Environment for X86_64BareMetal {
     const PAGING_STRUCTURE_BASE: usize = x86_64::paging::PAGING_STRUCTURE_BASE;

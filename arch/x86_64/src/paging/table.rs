@@ -47,12 +47,18 @@ pub const ALL_FLAGS: usize = PRESENT_FLAG
 /// A paging structure entry.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct PagingStructEntry<E: Environment + Clone> {
+pub struct PagingStructEntry<E>
+where
+    E: Environment + Clone + Default,
+{
     bytes: usize,
     _phantom: PhantomData<E>,
 }
 
-impl<E: Environment + Clone> PagingStructEntry<E> {
+impl<E> PagingStructEntry<E>
+where
+    E: Environment + Clone + Default,
+{
     pub const fn new(flags: usize, phys_addr: usize) -> Self {
         PagingStructEntry::<E> {
             bytes: flags | (phys_addr & MASK_51_12),
@@ -88,11 +94,17 @@ impl<E: Environment + Clone> PagingStructEntry<E> {
 }
 
 #[repr(C, align(0x1000))]
-pub struct PagingStruct<E: Environment + Clone> {
+pub struct PagingStruct<E>
+where
+    E: Environment + Clone + Default,
+{
     entries: [PagingStructEntry<E>; 512],
 }
 
-impl<E: Environment + Clone + Copy + Default> Default for PagingStruct<E> {
+impl<E> Default for PagingStruct<E>
+where
+    E: Environment + Clone + Copy + Default,
+{
     fn default() -> Self {
         Self {
             entries: [PagingStructEntry::<E>::default(); 512],
@@ -100,7 +112,10 @@ impl<E: Environment + Clone + Copy + Default> Default for PagingStruct<E> {
     }
 }
 
-impl<'a, E: Environment + Clone> PagingStruct<E> {
+impl<'a, E> PagingStruct<E>
+where
+    E: Environment + Clone + Default,
+{
     pub fn get_entry(&'a self, idx: usize) -> &'a PagingStructEntry<E> {
         &self.entries[idx]
     }

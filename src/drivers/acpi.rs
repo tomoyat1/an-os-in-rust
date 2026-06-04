@@ -242,8 +242,8 @@ fn _parse_madt(madt_addr: usize, length: u32) -> MADT {
     }
     let mut mapper = mm::mapper();
     let mut mapper = mapper.as_mut().unwrap();
-    mapper.map(madt_info.ioapic_addr - mm::MMIO_BASE, madt_info.ioapic_addr);
-    mapper.map(madt_info.lapic_addr - mm::MMIO_BASE, madt_info.lapic_addr);
+    mapper.map_mmio(madt_info.ioapic_addr - mm::MMIO_BASE);
+    mapper.map_mmio(madt_info.lapic_addr - mm::MMIO_BASE);
 
     madt_info
 }
@@ -270,9 +270,9 @@ fn _parse_hpet(hpet_addr: usize, length: u32) -> HPET {
         minimum_tick: hpet.minimum_tick,
         page_protection: hpet.page_protection,
     };
-    mm::mapper().as_mut().unwrap().map(
-        hpet_info.base_address - mm::MMIO_BASE,
-        hpet_info.base_address,
-    );
+    mm::mapper()
+        .as_mut()
+        .unwrap()
+        .map_mmio(hpet_info.base_address - mm::MMIO_BASE);
     hpet_info
 }

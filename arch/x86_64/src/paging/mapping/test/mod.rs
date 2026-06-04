@@ -2,11 +2,12 @@ mod fork;
 mod map;
 mod new_table;
 mod phys_addr;
+mod unmap;
 
 use super::*;
 use interface::Environment;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 struct UserlandTest(*mut u8);
 
 impl Environment for UserlandTest {

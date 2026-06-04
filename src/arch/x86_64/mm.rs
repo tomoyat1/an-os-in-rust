@@ -38,7 +38,7 @@ extern "C" {
 static MAPPER: WithSpinLock<Option<Mapper<X86_64BareMetal>>> = WithSpinLock::new(None);
 
 pub const KERNEL_BASE: usize = 0xffff_8000_0000_0000;
-pub const MMIO_BASE: usize = 0xffff_ff00_0000_0000;
+pub use x86_64::paging::MMIO_BASE;
 
 /// init_mm() (re)-initializes paging data structures for kernel execution.
 pub fn init_mm(memory_map: &[MemoryDescriptor]) {
@@ -123,8 +123,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
             | MemoryType::MMIO_PORT_SPACE => {
                 for p in 0..mdesc.page_count {
                     let phys_addr = (mdesc.phys_start + p * 0x1000) as usize;
-                    let virt_addr = MMIO_BASE + (mdesc.phys_start + p * 0x1000) as usize;
-                    MAPPER.lock().as_mut().unwrap().map(phys_addr, virt_addr);
+                    MAPPER.lock().as_mut().unwrap().map_mmio(phys_addr);
                 }
             }
             _ => { /* noop */ }

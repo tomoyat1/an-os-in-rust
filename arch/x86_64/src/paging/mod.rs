@@ -14,6 +14,7 @@ pub const MASK_29_0: usize = 0x0000_0000_3fff_ffff;
 pub const MASK_20_12: usize = 0x0000_0000_001f_f000;
 pub const MASK_20_0: usize = 0x0000_0000_001f_ffff;
 pub const PAGING_STRUCTURE_BASE: usize = 0xffff_ff80_0000_0000;
+pub const MMIO_BASE: usize = 0xffff_ff00_0000_0000;
 
 enum PageSize {
     Normal,
