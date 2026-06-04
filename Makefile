@@ -9,7 +9,7 @@ build: kernel bootloader
 
 .PHONY: kernel
 kernel:
-	cargo build -Z build-std=core,alloc  --target x86_64-unknown-aosir.json
+	cargo build -Z build-std=core,alloc -Zjson-target-spec --target x86_64-unknown-aosir.json
 
 .PHONY: bootloader
 bootloader:
