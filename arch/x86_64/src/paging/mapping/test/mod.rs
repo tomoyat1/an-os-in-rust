@@ -1,3 +1,4 @@
+mod cow;
 mod fork;
 mod map;
 mod new_table;

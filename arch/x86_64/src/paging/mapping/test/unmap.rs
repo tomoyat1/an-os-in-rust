@@ -15,6 +15,7 @@ fn test_unmap() {
         1,
         allocator,
         fake_native,
+        core::ptr::null_mut(),
     );
 
     let phys_addr = 0x0000_b000usize;

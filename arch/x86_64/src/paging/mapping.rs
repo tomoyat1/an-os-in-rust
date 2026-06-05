@@ -3,12 +3,12 @@ use crate::paging::table::{
     PagingStruct, PagingStructEntry, ALL_FLAGS, PRESENT_FLAG, PS_FLAG, RW_FLAG,
 };
 use alloc::collections::BTreeMap;
-
+use core::ptr;
 use core::ptr::write_bytes;
 use core::sync::atomic::Ordering::SeqCst;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use interface::Environment;
-use paging_common::physical::PageAllocator;
+use paging_common::physical::{Block, PageAllocator};
 
 #[cfg(test)]
 #[path = "./mapping/test/mod.rs"]
@@ -49,18 +49,12 @@ impl PagingLevel for PT {
     const SHIFT: usize = 12;
 }
 
-pub struct PagingStructBase<E>(*mut PagingStruct<E>)
-where
-    E: Environment + Clone + Default;
+pub struct SyncMutPointer<T>(*mut T);
+unsafe impl<T> Send for SyncMutPointer<T> {}
+unsafe impl<T> Sync for SyncMutPointer<T> {}
 
-unsafe impl<E> Send for PagingStructBase<E> where E: Environment + Clone + Default {}
-unsafe impl<E> Sync for PagingStructBase<E> where E: Environment + Clone + Default {}
-
-impl<E> From<&PagingStructBase<E>> for usize
-where
-    E: Environment + Clone + Default,
-{
-    fn from(base: &PagingStructBase<E>) -> usize {
+impl<T> From<&SyncMutPointer<T>> for usize {
+    fn from(base: &SyncMutPointer<T>) -> usize {
         base.0 as usize
     }
 }
@@ -76,7 +70,7 @@ pub struct Mapper<E>
 where
     E: Environment + Clone + Default,
 {
-    base: PagingStructBase<E>,
+    base: SyncMutPointer<PagingStruct<E>>,
     length: usize,
     // TODO: Bump style allocation will break with offset mapping.
     //       Use better allocation method
@@ -87,6 +81,9 @@ where
 
     page_allocator: PageAllocator,
     environment: E,
+
+    // Address to temporarily map pages to when copying data from aliased RO page to fresh page.
+    cow_dest: SyncMutPointer<u8>,
 }
 
 impl<E> Mapper<E>
@@ -99,18 +96,20 @@ where
         next: usize,
         page_allocator: PageAllocator,
         environment: E,
+        cow_dest: *mut u8,
     ) -> Self {
         let ptr = unsafe { base.add(7) } as *mut u8;
         unsafe {
             write_bytes(ptr, 0u8, length - BOOT_PAGE_TABLE_COUNT * 0x1000);
         }
         Mapper {
-            base: PagingStructBase(base),
+            base: SyncMutPointer(base),
             length,
             next,
             mapped_pages: BTreeMap::new(),
             page_allocator,
             environment,
+            cow_dest: SyncMutPointer(cow_dest),
         }
     }
 
@@ -377,6 +376,31 @@ where
                 let src_table = self.table_for_phys_addr(src_addr);
                 self.recursively_clone(src_table, dst_table, level - 1, virt_addr);
             }
+        }
+    }
+
+    pub fn cow(&mut self, virt_addr: *mut u8) {
+        let new_page = self.cow_tmp_map();
+
+        self.cow_copy(virt_addr, self.cow_dest.0);
+
+        self.unmap(usize::from(&self.cow_dest));
+        self.map(new_page.get_addr(), virt_addr as usize);
+    }
+
+    fn cow_tmp_map(&mut self) -> Block {
+        let new_page = self
+            .page_allocator
+            .allocate(12)
+            .expect("Physical memory exhausted!");
+        self.map(new_page.get_addr(), usize::from(&self.cow_dest));
+        new_page
+    }
+
+    fn cow_copy(&mut self, src: *mut u8, dest: *mut u8) {
+        // TODO: support huge and potentially gigantic pages.
+        unsafe {
+            ptr::copy_nonoverlapping(src, dest, 0x1000);
         }
     }
 

@@ -14,6 +14,7 @@ fn test_new_table() {
         0,
         allocator,
         fake_native,
+        core::ptr::null_mut(),
     );
     let first_table = mapper.new_table();
     // assert_eq!(mapper.next, 1, "Next table should be offset 1");

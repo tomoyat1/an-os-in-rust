@@ -91,6 +91,8 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
         7,
         allocator,
         arch,
+        // TODO: Make this a static variable, for provenance
+        0xffff_ffff_c000_0000 as *mut u8,
     );
     {
         let mut m = MAPPER.lock();
