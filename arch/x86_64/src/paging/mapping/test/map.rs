@@ -70,7 +70,7 @@ fn test_map() {
             "mapped_pages should be empty"
         );
 
-        unsafe { alloc::alloc::dealloc(base, layout) };
+        alloc::alloc::dealloc(base, layout);
     }
 }
 
@@ -155,7 +155,7 @@ fn test_map_userland() {
             1,
             "Should have one aliasing paging structure"
         );
-        let alias = mp
+        let (alias, _) = mp
             .aliasing_paging_structures
             .first()
             .expect("There should be exactly one aliasing paging structure");
@@ -164,7 +164,7 @@ fn test_map_userland() {
             "pml4 should be the only aliasing paging structure"
         );
 
-        unsafe { alloc::alloc::dealloc(base, layout) };
+        alloc::alloc::dealloc(base, layout);
     }
 }
 
@@ -215,7 +215,7 @@ fn test_map_userland_aliased() {
         pte.set_flags(PRESENT_FLAG, true);
     }
     let mut aliasing_paging_structures = BTreeSet::new();
-    aliasing_paging_structures.insert(existing_pml4 as usize);
+    aliasing_paging_structures.insert((existing_pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
         phys_addr,
         MappedPage {
@@ -287,11 +287,11 @@ fn test_map_userland_aliased() {
         );
         let _ = mp
             .aliasing_paging_structures
-            .get(&(existing_pml4 as usize))
+            .get(&(existing_pml4 as usize, virt_addr))
             .expect("Alias existing_pml4 should exist");
         let _ = mp
             .aliasing_paging_structures
-            .get(&(base as usize))
+            .get(&(base as usize, virt_addr))
             .expect("Alias base should exist");
 
         let existing_leaf = mapper
@@ -318,6 +318,6 @@ fn test_map_userland_aliased() {
         );
         assert_eq!(new_flags & RW_FLAG, 0, "PTE should be RO");
 
-        unsafe { alloc::alloc::dealloc(base, layout) };
+        alloc::alloc::dealloc(base, layout);
     }
 }

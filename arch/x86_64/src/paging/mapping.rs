@@ -31,7 +31,7 @@ struct MappedPage {
     phys_addr: usize,
     size: PageSize,
     refs: AtomicUsize,
-    aliasing_paging_structures: BTreeSet<usize>,
+    aliasing_paging_structures: BTreeSet<(usize, usize)>,
 }
 
 struct LeafEntry {
@@ -111,14 +111,15 @@ impl<E: Environment> Mapper<E> {
                     unsafe {
                         phys_page
                             .aliasing_paging_structures
-                            .insert((*pml4).phys_addr::<E>());
+                            .insert(((*pml4).phys_addr::<E>(), virt_addr));
                     }
                     // SAFETY: table_for_phys_addr and walk_to_leaf are pure reads of
                     //         self.base and never touch self.mapped_pages, so the data behind
                     //         this pointer remains valid and unmodified through the loop.
-                    let set_ptr = &phys_page.aliasing_paging_structures as *const BTreeSet<usize>;
+                    let set_ptr =
+                        &phys_page.aliasing_paging_structures as *const BTreeSet<(usize, usize)>;
                     unsafe {
-                        for aliasing in (*set_ptr).iter() {
+                        for (aliasing, _) in (*set_ptr).iter() {
                             let aliasing_pml4 = self.table_for_phys_addr(*aliasing);
                             let leaf = self
                                 .walk_to_leaf(aliasing_pml4, virt_addr)
@@ -131,7 +132,7 @@ impl<E: Environment> Mapper<E> {
                 None => {
                     let mut aliasing_paging_structures = BTreeSet::new();
                     unsafe {
-                        aliasing_paging_structures.insert((*pml4).phys_addr::<E>());
+                        aliasing_paging_structures.insert(((*pml4).phys_addr::<E>(), virt_addr));
                     }
                     self.mapped_pages.insert(
                         phys_addr,
@@ -181,44 +182,51 @@ impl<E: Environment> Mapper<E> {
             }
         }
 
-        unsafe {
-            let entry: &mut PagingStructEntry = (&leaf).into();
-            *entry = PagingStructEntry::default();
-        }
+        let entry: &mut PagingStructEntry = (&leaf).into();
+        *entry = PagingStructEntry::default();
 
-        let phys_page =
-            self.mapped_pages
+        if (virt_addr >> 51) == 0 {
+            let phys_page = self
+                .mapped_pages
                 .get_mut(&leaf.phys_addr)
-                .expect("Mapped pages should be in mapped_pages") as *mut MappedPage;
-        // SAFETY: We either dereference the pointer and decrement the ref count or we remove
-        //         the MappedPage, but not both.
-        let cr3 = self.environment.paging_structure_base() as usize;
-        unsafe {
-            if (*phys_page).refs.load(SeqCst) > 1 {
-                (*phys_page).refs.fetch_sub(1, SeqCst);
-                assert!(
-                    (*phys_page).aliasing_paging_structures.remove(&cr3),
-                    "Aliasing cr3 must have been in aliasing list: {cr3:x}"
-                );
-                if (*phys_page).refs.load(SeqCst) == 1 {
-                    assert_eq!(
-                        (*phys_page).aliasing_paging_structures.len(),
-                        1,
-                        "There must be exactly one aliasing paging structure"
+                .expect("Mapped pages should be in mapped_pages")
+                as *mut MappedPage;
+            // SAFETY: We either dereference the pointer and decrement the ref count or we remove
+            //         the MappedPage, but not both.
+            let cr3 = unsafe {
+                let table = self.environment.paging_structure_base() as *mut PagingStruct;
+                (*table).phys_addr::<E>()
+            };
+
+            unsafe {
+                if (*phys_page).refs.load(SeqCst) > 1 {
+                    (*phys_page).refs.fetch_sub(1, SeqCst);
+                    assert!(
+                        (*phys_page)
+                            .aliasing_paging_structures
+                            .remove(&(cr3, virt_addr)),
+                        "Aliasing cr3 must have been in aliasing list: ({cr3:x}, {virt_addr:x})"
                     );
-                    let pml4 = (*phys_page)
-                        .aliasing_paging_structures
-                        .first()
-                        .expect("There must be exactly one aliasing paging structure");
-                    let pml4 = self.table_for_phys_addr(*pml4);
-                    let leaf = self
-                        .walk_to_leaf(pml4, virt_addr)
-                        .expect("virt_addr must be mapped");
-                    let entry: &mut PagingStructEntry = (&leaf).into();
-                    entry.set_flags(RW_FLAG, true);
+                    if (*phys_page).refs.load(SeqCst) == 1 {
+                        assert_eq!(
+                            (*phys_page).aliasing_paging_structures.len(),
+                            1,
+                            "There must be exactly one aliasing paging structure"
+                        );
+                        let (pml4, _) = (*phys_page)
+                            .aliasing_paging_structures
+                            .first()
+                            .expect("There must be exactly one aliasing paging structure");
+                        let pml4 = self.table_for_phys_addr(*pml4);
+                        let leaf = self
+                            .walk_to_leaf(pml4, virt_addr)
+                            .expect("virt_addr must be mapped");
+                        let entry: &mut PagingStructEntry = (&leaf).into();
+                        entry.set_flags(RW_FLAG, true);
+                    }
+                } else {
+                    self.mapped_pages.remove(&leaf.phys_addr);
                 }
-            } else {
-                self.mapped_pages.remove(&leaf.phys_addr);
             }
         }
 
@@ -337,7 +345,7 @@ impl<E: Environment> Mapper<E> {
                     "MappedPage for physical page should have been created when getting mapped",
                 );
                 mp.refs.fetch_add(1, Ordering::Release);
-                mp.aliasing_paging_structures.insert(dst_cr3);
+                mp.aliasing_paging_structures.insert((dst_cr3, virt_addr));
             } else {
                 // src_entry is a pdpte or pde with PS == 0
                 if src_flags & PRESENT_FLAG != PRESENT_FLAG {
@@ -359,7 +367,7 @@ impl<E: Environment> Mapper<E> {
     }
 
     pub fn cow(&mut self, virt_addr: *mut u8) {
-        let pml4 = unsafe { self.environment.paging_structure_base() } as *const PagingStruct;
+        let pml4 = self.environment.paging_structure_base() as *const PagingStruct;
 
         let (pml4e_addr, _) = self
             .walk::<PML4>(pml4, virt_addr as usize)

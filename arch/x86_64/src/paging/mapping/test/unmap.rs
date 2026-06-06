@@ -50,7 +50,7 @@ fn test_unmap() {
     }
 
     let mut aliases = BTreeSet::new();
-    aliases.insert(virt_addr);
+    aliases.insert((pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
         phys_addr,
         MappedPage {

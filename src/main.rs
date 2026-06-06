@@ -101,6 +101,9 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         writeln!(serial::Handle::new(), "Yo! from kernel main loop");
         sleep(1000);
 
+        let ptr = 0x1000 as *mut u32;
+        *ptr = 0xdeadbeef;
+
         // Were done handling all unprocessed inputs/outputs. Switch to another task.
         asm!(
             "mov rax, 0x18",

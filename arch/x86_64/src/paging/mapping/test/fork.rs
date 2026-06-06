@@ -50,7 +50,7 @@ fn test_fork() {
     }
 
     let mut aliases = BTreeSet::new();
-    aliases.insert(src_pml4 as usize);
+    aliases.insert((src_pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
         phys_addr,
         MappedPage {
@@ -158,11 +158,13 @@ fn test_fork() {
         "Aliasing set must contain exactly src and dest PML4"
     );
     assert!(
-        mp.aliasing_paging_structures.contains(&(src_pml4 as usize)),
+        mp.aliasing_paging_structures
+            .contains(&(src_pml4 as usize, virt_addr)),
         "src_pml4 must be in aliasing set"
     );
     assert!(
-        mp.aliasing_paging_structures.contains(&new_table_base),
+        mp.aliasing_paging_structures
+            .contains(&(new_table_base, virt_addr)),
         "dest_pml4 must be in aliasing set"
     );
 

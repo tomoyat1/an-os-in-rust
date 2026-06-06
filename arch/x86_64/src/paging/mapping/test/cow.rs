@@ -111,9 +111,6 @@ fn test_cow() {
         fake_dest_page,
     );
 
-    // mapper.map(fake_src_page as usize, fake_src_page as usize);
-    // mapper.map(fake_src_page as usize, fake_src_page as usize);
-
     let phys_addr = fake_src_page as usize;
     let virt_addr = fake_src_page as usize;
 
@@ -153,7 +150,7 @@ fn test_cow() {
         pte.set_flags(PRESENT_FLAG, true);
     }
     let mut aliasing_paging_structures = BTreeSet::new();
-    aliasing_paging_structures.insert(src_pml4 as usize);
+    aliasing_paging_structures.insert((src_pml4 as usize, fake_src_page as usize));
     mapper.mapped_pages.insert(
         fake_src_page as usize,
         MappedPage {
@@ -187,7 +184,8 @@ fn test_cow() {
         .get_mut(&(fake_src_page as usize))
         .expect("Mapped page should exist in mapped_pages");
     mp.refs.fetch_add(1, Ordering::Relaxed);
-    mp.aliasing_paging_structures.insert(dest_pml4 as usize);
+    mp.aliasing_paging_structures
+        .insert((dest_pml4 as usize, fake_src_page as usize));
 
     mapper.cow(fake_src_page);
 
@@ -288,7 +286,7 @@ fn test_cow() {
         1,
         "Should have one aliasing paging structure"
     );
-    let alias = src_mp
+    let (alias, _) = src_mp
         .aliasing_paging_structures
         .first()
         .expect("There should be exactly one aliasing paging structure");
@@ -308,7 +306,7 @@ fn test_cow() {
         1,
         "There should be exactly one aliasing paging structure"
     );
-    let alias = dest_mp
+    let (alias, _) = dest_mp
         .aliasing_paging_structures
         .first()
         .expect("There should be exactly one aliasing paging structure");
