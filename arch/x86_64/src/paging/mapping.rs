@@ -3,7 +3,7 @@ use crate::paging::table::{
     PagingLevel, PagingStruct, PagingStructEntry, ALL_FLAGS, PD, PDPT, PML4, PRESENT_FLAG, PS_FLAG,
     PT, RW_FLAG,
 };
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use core::ptr;
 use core::ptr::write_bytes;
 use core::sync::atomic::Ordering::SeqCst;
@@ -31,6 +31,7 @@ struct MappedPage {
     phys_addr: usize,
     size: PageSize,
     refs: AtomicUsize,
+    aliasing_paging_structures: BTreeSet<usize>,
 }
 
 struct LeafEntry {
@@ -107,16 +108,38 @@ impl<E: Environment> Mapper<E> {
             match phys_page {
                 Some(phys_page) => {
                     phys_page.refs.fetch_add(1, SeqCst);
-                    // // TODO: if mapping is aliased, set RW_FLAG __for every alias__ to 0
+                    unsafe {
+                        phys_page
+                            .aliasing_paging_structures
+                            .insert((*pml4).phys_addr::<E>());
+                    }
+                    // SAFETY: table_for_phys_addr and walk_to_leaf are pure reads of
+                    //         self.base and never touch self.mapped_pages, so the data behind
+                    //         this pointer remains valid and unmodified through the loop.
+                    let set_ptr = &phys_page.aliasing_paging_structures as *const BTreeSet<usize>;
+                    unsafe {
+                        for aliasing in (*set_ptr).iter() {
+                            let aliasing_pml4 = self.table_for_phys_addr(*aliasing);
+                            let leaf = self
+                                .walk_to_leaf(aliasing_pml4, virt_addr)
+                                .expect("Aliasing paging structures must map address");
+                            let entry: &mut PagingStructEntry = (&leaf).into();
+                            entry.set_flags(RW_FLAG, false)
+                        }
+                    }
                 }
                 None => {
-                    // TODO: if mapping is not aliased, set RW_FLAG to 1
+                    let mut aliasing_paging_structures = BTreeSet::new();
+                    unsafe {
+                        aliasing_paging_structures.insert((*pml4).phys_addr::<E>());
+                    }
                     self.mapped_pages.insert(
                         phys_addr,
                         MappedPage {
                             phys_addr,
                             size: PageSize::Normal,
                             refs: AtomicUsize::new(1),
+                            aliasing_paging_structures,
                         },
                     );
                 }
@@ -126,8 +149,9 @@ impl<E: Environment> Mapper<E> {
     }
 
     fn unmap(&mut self, virt_addr: usize) {
+        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
         let leaf = self
-            .walk_to_leaf(virt_addr)
+            .walk_to_leaf(pml4, virt_addr)
             // TODO: Make this function return a Result
             .expect("Page to be unmapped must be mapped");
         match leaf.page_size {
@@ -168,9 +192,31 @@ impl<E: Environment> Mapper<E> {
                 .expect("Mapped pages should be in mapped_pages") as *mut MappedPage;
         // SAFETY: We either dereference the pointer and decrement the ref count or we remove
         //         the MappedPage, but not both.
+        let cr3 = self.environment.paging_structure_base() as usize;
         unsafe {
             if (*phys_page).refs.load(SeqCst) > 1 {
                 (*phys_page).refs.fetch_sub(1, SeqCst);
+                assert!(
+                    (*phys_page).aliasing_paging_structures.remove(&cr3),
+                    "Aliasing cr3 must have been in aliasing list: {cr3:x}"
+                );
+                if (*phys_page).refs.load(SeqCst) == 1 {
+                    assert_eq!(
+                        (*phys_page).aliasing_paging_structures.len(),
+                        1,
+                        "There must be exactly one aliasing paging structure"
+                    );
+                    let pml4 = (*phys_page)
+                        .aliasing_paging_structures
+                        .first()
+                        .expect("There must be exactly one aliasing paging structure");
+                    let pml4 = self.table_for_phys_addr(*pml4);
+                    let leaf = self
+                        .walk_to_leaf(pml4, virt_addr)
+                        .expect("virt_addr must be mapped");
+                    let entry: &mut PagingStructEntry = (&leaf).into();
+                    entry.set_flags(RW_FLAG, true);
+                }
             } else {
                 self.mapped_pages.remove(&leaf.phys_addr);
             }
@@ -196,7 +242,8 @@ impl<E: Environment> Mapper<E> {
     }
 
     pub fn phys_addr(&self, virt_addr: usize) -> Option<usize> {
-        let leaf = self.walk_to_leaf(virt_addr)?;
+        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
+        let leaf = self.walk_to_leaf(pml4, virt_addr)?;
         match leaf.page_size {
             PageSize::Gigantic => Some(leaf.phys_addr | (virt_addr & ((1 << PDPT::SHIFT) - 1))),
             PageSize::Huge => Some(leaf.phys_addr | (virt_addr & ((1 << PD::SHIFT) - 1))),
@@ -223,6 +270,7 @@ impl<E: Environment> Mapper<E> {
                 dst_entry.set_flags(flags, true);
             }
         }
+
         for i in 0..256usize {
             let (entry_addr, flags) = unsafe {
                 let entry = (*src_pml4).get_entry(i);
@@ -232,18 +280,19 @@ impl<E: Environment> Mapper<E> {
                 continue;
             }
             let dst_pdpt = self.new_table();
-            unsafe {
+            let dst_cr3 = unsafe {
                 (*dst_pml4).get_entry_mut(i).set_flags(flags, true);
                 let dst_table_addr = (*dst_pdpt).phys_addr::<E>();
-                (*dst_pml4).get_entry_mut(i).set_addr(dst_table_addr)
-            }
+                (*dst_pml4).get_entry_mut(i).set_addr(dst_table_addr);
+                (*dst_pml4).phys_addr::<E>()
+            };
 
             let src_pdpt = unsafe {
                 let entry = (*src_pml4).get_entry(i);
                 let phys_addr = entry.get_addr();
                 self.table_for_phys_addr(phys_addr)
             };
-            self.recursively_clone(src_pdpt, dst_pdpt, 3, i << 39);
+            self.recursively_clone(src_pdpt, dst_pdpt, dst_cr3, 3, i << 39);
         }
 
         unsafe { (*dst_pml4).phys_addr::<E>() }
@@ -253,6 +302,7 @@ impl<E: Environment> Mapper<E> {
         &mut self,
         src: *mut PagingStruct,
         dst: *mut PagingStruct,
+        dst_cr3: usize,
         level: usize, // 3: pdpt, 2: pd, 1: pt
         virt_addr: usize,
     ) {
@@ -287,6 +337,7 @@ impl<E: Environment> Mapper<E> {
                     "MappedPage for physical page should have been created when getting mapped",
                 );
                 mp.refs.fetch_add(1, Ordering::Release);
+                mp.aliasing_paging_structures.insert(dst_cr3);
             } else {
                 // src_entry is a pdpte or pde with PS == 0
                 if src_flags & PRESENT_FLAG != PRESENT_FLAG {
@@ -298,11 +349,11 @@ impl<E: Environment> Mapper<E> {
                     let dst_table_addr = (*dst_table).phys_addr::<E>();
                     dst_entry.set_addr(dst_table_addr);
                     dst_entry.set_flags(src_flags, true);
-                    dst_entry.set_flags(RW_FLAG, false)
+                    dst_entry.set_flags(RW_FLAG, true)
                 }
 
                 let src_table = self.table_for_phys_addr(src_addr);
-                self.recursively_clone(src_table, dst_table, level - 1, virt_addr);
+                self.recursively_clone(src_table, dst_table, dst_cr3, level - 1, virt_addr);
             }
         }
     }
@@ -336,7 +387,7 @@ impl<E: Environment> Mapper<E> {
 
         let (pte_addr, _) = self
             .walk::<PT>(pt, virt_addr as usize)
-            .expect("Copy-on-write of small pages is unsupported");
+            .expect("PTE of mapped page should exist");
 
         {
             let src_phys_page = self
@@ -347,13 +398,13 @@ impl<E: Environment> Mapper<E> {
                 src_phys_page.refs.load(SeqCst) > 1,
                 "Mapped page ref count should be greater than 1"
             );
-            src_phys_page.refs.fetch_sub(1, SeqCst);
         }
 
         let new_page = self.cow_tmp_map();
 
         self.cow_copy(virt_addr, self.cow_dest.0);
 
+        self.unmap(virt_addr as usize);
         self.unmap(usize::from(&self.cow_dest));
         self.map(new_page.get_addr(), virt_addr as usize);
     }
@@ -435,8 +486,7 @@ impl<E: Environment> Mapper<E> {
         }
     }
 
-    fn walk_to_leaf(&self, virt_addr: usize) -> Option<LeafEntry> {
-        let pml4 = unsafe { self.environment.paging_structure_base() } as *const PagingStruct;
+    fn walk_to_leaf(&self, pml4: *mut PagingStruct, virt_addr: usize) -> Option<LeafEntry> {
         let (pml4e_addr, _) = self.walk::<PML4>(pml4, virt_addr)?;
         let pdpt = self.table_for_phys_addr(pml4e_addr);
 

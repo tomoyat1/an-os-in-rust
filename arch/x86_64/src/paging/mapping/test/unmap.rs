@@ -49,12 +49,15 @@ fn test_unmap() {
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
     }
 
+    let mut aliases = BTreeSet::new();
+    aliases.insert(virt_addr);
     mapper.mapped_pages.insert(
         phys_addr,
         MappedPage {
             phys_addr,
             size: PageSize::Normal,
             refs: AtomicUsize::new(1),
+            aliasing_paging_structures: aliases,
         },
     );
 

@@ -145,6 +145,19 @@ fn test_map_userland() {
             1,
             "Mapped page ref count should be 1 after allocation"
         );
+        assert_eq!(
+            mp.aliasing_paging_structures.len(),
+            1,
+            "Should have one aliasing paging structure"
+        );
+        let alias = mp
+            .aliasing_paging_structures
+            .first()
+            .expect("There should be exactly one aliasing paging structure");
+        assert_eq!(
+            *alias, pml4 as usize,
+            "pml4 should be the only aliasing paging structure"
+        );
 
         unsafe { alloc::alloc::dealloc(base, layout) };
     }
