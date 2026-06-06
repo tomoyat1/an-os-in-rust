@@ -198,3 +198,12 @@ fn exclude_ranges(
 
     block
 }
+
+#[no_mangle]
+unsafe extern "C" fn page_fault_handler(error_code: usize, virt_addr: usize) {
+    // TODO: support other page faults
+    if error_code & (PRESENT_FLAG | RW_FLAG) != PRESENT_FLAG | RW_FLAG {
+        asm!("cli; hlt")
+    }
+    MAPPER.lock().as_mut().unwrap().cow(virt_addr as *mut u8)
+}

@@ -46,13 +46,12 @@ general_protection_fault_isr:
 # 14 Page Fault
 .global page_fault_isr
 page_fault_isr:
-    # Just halt
-    hlt
     pusha
     cld
+    mov 88(%rsp), %rdi
+    mov %cr2, %rsi
     call page_fault_handler
-    popa
-    iretq
+    jmp isr_exit
 
 .global ps2_keyboard_isr
 ps2_keyboard_isr:

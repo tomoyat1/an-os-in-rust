@@ -178,12 +178,6 @@ unsafe extern "C" fn general_protection_fault_handler() {
 }
 
 #[no_mangle]
-unsafe extern "C" fn page_fault_handler() {
-    let foo = 1 + 1;
-    /* no-op */
-}
-
-#[no_mangle]
 unsafe extern "C" fn ps2_keyboard_handler() {
     let foo = 1 + 1;
     let mut lapic = LOCAL_APIC.lock();
