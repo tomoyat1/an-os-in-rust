@@ -1,6 +1,6 @@
 # An Operating System in Rust
 
-> Task switching is voluntary.
+> Now with Cow (paging, not the mooing kind)
 
 ## Requirements
 
@@ -34,9 +34,9 @@ The following will build both the bootloader and the kernel. Results will be fou
 
 1. Copy the bootloader executable `target/x86_64-unknown-uefi/debug/bootx64.efi` to `\EFI\BOOT\bootx64.efi` in your
    virtual machine's EFI System Partition.
-1. Copy the kernel executable `target/x86_64-unknown-aosir/debug/aosir` to `\aosir` in your
+2. Copy the kernel executable `target/x86_64-unknown-aosir/debug/aosir` to `\aosir` in your
    virtual machine's EFI System Partition.
-1. Turn on your machine.
+3. Turn on your machine.
    ```console
    % sudo qemu-system-x86_64 \
      -S \
@@ -49,8 +49,8 @@ The following will build both the bootloader and the kernel. Results will be fou
      -m 4096 \
      -nic tap,ifname=tap0,model=rtl8139
    ```
-3. Observe that it does nothing useful ;)
-4. If you use `arping` to broadcast a ARP request, the results of parsing the ethernet frame header will be outputted to
+4. Observe that it does nothing useful ;)
+5. If you use `arping` to broadcast a ARP request, the results of parsing the ethernet frame header will be outputted to
    serial console.
    ```console
    % sudo arping -I tap0 -U -S 192.168.11.16  192.168.11.1 // Both source and destination IP address don't matter now.
