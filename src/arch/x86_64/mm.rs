@@ -202,8 +202,19 @@ fn exclude_ranges(
 #[no_mangle]
 unsafe extern "C" fn page_fault_handler(error_code: usize, virt_addr: usize) {
     // TODO: support other page faults
-    if error_code & (PRESENT_FLAG | RW_FLAG) != PRESENT_FLAG | RW_FLAG {
-        asm!("cli; hlt")
+    if error_code & PRESENT_FLAG == 0 {
+        // TODO: on-demand paging
+        if virt_addr == 0 {
+            // TODO: SIGSEGV to userland, or kernel panic if kernel mode
+            asm!("cli; hlt");
+            return;
+        }
+        MAPPER.lock().as_mut().unwrap().alloc_page_at(virt_addr);
+        return;
     }
-    MAPPER.lock().as_mut().unwrap().cow(virt_addr as *mut u8)
+    if error_code & RW_FLAG == RW_FLAG {
+        MAPPER.lock().as_mut().unwrap().cow(virt_addr as *mut u8);
+        return;
+    }
+    asm!("cli; hlt");
 }

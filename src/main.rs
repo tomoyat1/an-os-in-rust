@@ -103,6 +103,8 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 
         let ptr = 0x1000 as *mut u32;
         *ptr = 0xdeadbeef;
+        let ptr = 0x2000 as *mut u32;
+        *ptr = 0xcafebabe;
 
         // Were done handling all unprocessed inputs/outputs. Switch to another task.
         asm!(
