@@ -33,6 +33,19 @@ struct MappedPage {
     refs: AtomicUsize,
 }
 
+struct LeafEntry {
+    table: *mut PagingStruct,
+    phys_addr: usize,
+    idx: usize,
+    size: PageSize,
+}
+
+impl<'a> From<&LeafEntry> for &'a mut PagingStructEntry {
+    fn from(leaf: &LeafEntry) -> &'a mut PagingStructEntry {
+        unsafe { (*leaf.table).get_entry_mut(leaf.idx) }
+    }
+}
+
 // TODO: make this a trait if we support architectures other than x86_64.
 pub struct Mapper<E>
 where
@@ -112,84 +125,46 @@ impl<E: Environment> Mapper<E> {
         self.environment.flush_tlb();
     }
 
-    fn unmap(&mut self, virt_addr: usize) -> Option<()> {
-        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
-        let (pml4e_addr, _) = self.walk::<PML4>(pml4, virt_addr)?;
-        let pdpt = self.table_for_phys_addr(pml4e_addr);
-        let (pdpte_addr, pdpte_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
-        if pdpte_flags & PS_FLAG == PS_FLAG {
-            const MASK: usize = (1 << 30) - 1;
-            assert_eq!(
-                virt_addr & MASK,
-                0,
-                "Virtual address must be 1 GiB multiple when unmapping gigantic page."
-            );
-            unsafe {
-                let idx = PDPT::entry_idx(virt_addr);
-                let entry = (*pdpt).get_entry_mut(idx);
-                *entry = PagingStructEntry::default();
+    fn unmap(&mut self, virt_addr: usize) {
+        let leaf = self
+            .walk_to_leaf(virt_addr)
+            // TODO: Make this function return a Result
+            .expect("Page to be unmapped must be mapped");
+        match leaf.size {
+            PageSize::Gigantic => {
+                const MASK: usize = (1 << 30) - 1;
+                assert_eq!(
+                    virt_addr & MASK,
+                    0,
+                    "Virtual address must be 1 GiB multiple when unmapping gigantic page."
+                );
             }
-
-            let phys_page = self
-                .mapped_pages
-                .get_mut(&pdpte_addr)
-                .expect("Mapped pages should be in mapped_pages")
-                as *mut MappedPage;
-            // SAFETY: We either dereference the pointer and decrement the ref count or we remove
-            //         the MappedPage, but not both.
-            unsafe {
-                if (*phys_page).refs.load(SeqCst) > 1 {
-                    (*phys_page).refs.fetch_sub(1, SeqCst);
-                } else {
-                    self.mapped_pages.remove(&pdpte_addr);
-                }
+            PageSize::Huge => {
+                const MASK: usize = (1 << 21) - 1;
+                assert_eq!(
+                    virt_addr & MASK,
+                    0,
+                    "Virtual address must be 2 MiB multiple when unmapping huge page."
+                );
             }
-
-            return Some(());
+            PageSize::Normal => {
+                const MASK: usize = (1 << 12) - 1;
+                assert_eq!(
+                    virt_addr & MASK,
+                    0,
+                    "Virtual address must be 4 KiB multiple when unmapping huge page."
+                );
+            }
         }
-        let pd = self.table_for_phys_addr(pdpte_addr);
-        let (pde_addr, pde_flags) = self.walk::<PD>(pd, virt_addr)?;
-        if pde_flags & PS_FLAG == PS_FLAG {
-            const MASK: usize = (1 << 21) - 1;
-            assert_eq!(
-                virt_addr & MASK,
-                0,
-                "Virtual address must be 2 MiB multiple when unmapping huge page."
-            );
-            unsafe {
-                let idx = PD::entry_idx(virt_addr);
-                let entry = (*pd).get_entry_mut(idx);
-                *entry = PagingStructEntry::default();
-            }
 
-            let phys_page = self
-                .mapped_pages
-                .get_mut(&pde_addr)
-                .expect("Mapped pages should be in mapped_pages")
-                as *mut MappedPage;
-            // SAFETY: We either dereference the pointer and decrement the ref count or we remove
-            //         the MappedPage, but not both.
-            unsafe {
-                if (*phys_page).refs.load(SeqCst) > 1 {
-                    (*phys_page).refs.fetch_sub(1, SeqCst);
-                } else {
-                    self.mapped_pages.remove(&pde_addr);
-                }
-            }
-
-            return Some(());
-        }
-        let pt = self.table_for_phys_addr(pde_addr);
-        let (pte_addr, _) = self.walk::<PT>(pt, virt_addr)?;
         unsafe {
-            let idx = PT::entry_idx(virt_addr);
-            let entry = (*pt).get_entry_mut(idx);
+            let entry: &mut PagingStructEntry = (&leaf).into();
             *entry = PagingStructEntry::default();
         }
 
         let phys_page =
             self.mapped_pages
-                .get_mut(&pte_addr)
+                .get_mut(&leaf.phys_addr)
                 .expect("Mapped pages should be in mapped_pages") as *mut MappedPage;
         // SAFETY: We either dereference the pointer and decrement the ref count or we remove
         //         the MappedPage, but not both.
@@ -197,14 +172,9 @@ impl<E: Environment> Mapper<E> {
             if (*phys_page).refs.load(SeqCst) > 1 {
                 (*phys_page).refs.fetch_sub(1, SeqCst);
             } else {
-                let _ = self
-                    .mapped_pages
-                    .remove(&pte_addr)
-                    .expect("Removed MappedPage must have been in mapped_pages");
+                self.mapped_pages.remove(&leaf.phys_addr);
             }
         }
-
-        Some(())
 
         // TODO: Garbage collection of no longer used paging structures.
         //       This only has meaning once we have memory reclamation in Mapper.
@@ -477,5 +447,37 @@ impl<E: Environment> Mapper<E> {
         }
     }
 
-    // fn walk_to_leaf(&self, virt_addr: usize) -> (usize, usize) {}
+    fn walk_to_leaf(&self, virt_addr: usize) -> Option<LeafEntry> {
+        let pml4 = unsafe { self.environment.paging_structure_base() } as *const PagingStruct;
+        let (pml4e_addr, _) = self.walk::<PML4>(pml4, virt_addr)?;
+        let pdpt = self.table_for_phys_addr(pml4e_addr);
+
+        let (pdpte_addr, pdpte_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
+        if pdpte_flags & PS_FLAG == PS_FLAG {
+            return Some(LeafEntry {
+                table: pdpt,
+                phys_addr: pdpte_addr,
+                idx: PDPT::entry_idx(virt_addr),
+                size: PageSize::Gigantic,
+            });
+        }
+        let pd = self.table_for_phys_addr(pdpte_addr);
+        let (pde_addr, pde_flags) = self.walk::<PD>(pd, virt_addr)?;
+        if pde_flags & PS_FLAG == PS_FLAG {
+            return Some(LeafEntry {
+                table: pd,
+                phys_addr: pde_addr,
+                idx: PD::entry_idx(virt_addr),
+                size: PageSize::Huge,
+            });
+        }
+        let pt = self.table_for_phys_addr(pde_addr);
+        let (pte_addr, _) = self.walk::<PT>(pt, virt_addr)?;
+        Some(LeafEntry {
+            table: pt,
+            phys_addr: pte_addr,
+            idx: PT::entry_idx(virt_addr),
+            size: PageSize::Normal,
+        })
+    }
 }
