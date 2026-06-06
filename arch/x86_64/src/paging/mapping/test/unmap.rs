@@ -4,13 +4,12 @@ use paging_common::physical::PageAllocator;
 #[test]
 fn test_unmap() {
     let allocator = PageAllocator::new();
-    let layout =
-        core::alloc::Layout::new::<[PagingStruct<UserlandTest>; PAGING_STRUCTURE_REGION_LEN]>();
+    let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
     let fake_native = UserlandTest(base);
     // `next = 1` reserves index 0 for the source PML4 (located at `base`).
     let mut mapper = Mapper::new(
-        base as *mut PagingStruct<UserlandTest>,
+        base as *mut PagingStruct,
         0x200000,
         1,
         allocator,
@@ -26,7 +25,7 @@ fn test_unmap() {
     let pd_idx = (virt_addr & MASK_29_21) >> 21;
     let pt_idx = (virt_addr & MASK_20_12) >> 12;
 
-    let pml4 = base as *mut PagingStruct<UserlandTest>;
+    let pml4 = base as *mut PagingStruct;
 
     let pdpt = mapper.new_table();
     let pd = mapper.new_table();
@@ -34,15 +33,15 @@ fn test_unmap() {
 
     unsafe {
         let pml4e = (*pml4).get_entry_mut(pml4_idx);
-        pml4e.set_addr((*pdpt).phys_addr());
+        pml4e.set_addr((*pdpt).phys_addr::<UserlandTest>());
         pml4e.set_flags(PRESENT_FLAG | RW_FLAG, true);
 
         let pdpte = (*pdpt).get_entry_mut(pdpt_idx);
-        pdpte.set_addr((*pd).phys_addr());
+        pdpte.set_addr((*pd).phys_addr::<UserlandTest>());
         pdpte.set_flags(PRESENT_FLAG | RW_FLAG, true);
 
         let pde = (*pd).get_entry_mut(pd_idx);
-        pde.set_addr((*pt).phys_addr());
+        pde.set_addr((*pt).phys_addr::<UserlandTest>());
         pde.set_flags(PRESENT_FLAG | RW_FLAG, true);
 
         let pte = (*pt).get_entry_mut(pt_idx);

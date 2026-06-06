@@ -150,7 +150,7 @@ impl TaskList {
             // TODO: create separate address space by going through the Mapper.
             let cr3 = mapper().as_mut().unwrap().fork(
                 (current_task.info.registers.cr3 + X86_64BareMetal::PAGING_STRUCTURE_BASE)
-                    as *mut PagingStruct<X86_64BareMetal>,
+                    as *mut PagingStruct,
             );
             (*ptr).info.registers = Registers {
                 stack_top: 0,

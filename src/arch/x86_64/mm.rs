@@ -20,19 +20,19 @@ use x86_64_bare_metal::X86_64BareMetal;
 
 extern "C" {
     #[link_name = "boot_pml4"]
-    static mut KERNEL_PML4: [PagingStructEntry<X86_64BareMetal>; 512];
+    static mut KERNEL_PML4: [PagingStructEntry; 512];
 
     #[link_name = "boot_pdpt"]
-    static mut BOOT_PDPT: [PagingStructEntry<X86_64BareMetal>; 512];
+    static mut BOOT_PDPT: [PagingStructEntry; 512];
 
     #[link_name = "boot_pdt"]
-    static mut BOOT_PDT: [PagingStructEntry<X86_64BareMetal>; 512];
+    static mut BOOT_PDT: [PagingStructEntry; 512];
 
     #[link_name = "boot_paging_pdpt"]
-    static mut BOOT_PAGING_PDPT: [PagingStructEntry<X86_64BareMetal>; 512];
+    static mut BOOT_PAGING_PDPT: [PagingStructEntry; 512];
 
     #[link_name = "boot_paging_pdt"]
-    static mut BOOT_PAGING_PDT: [PagingStructEntry<X86_64BareMetal>; 512];
+    static mut BOOT_PAGING_PDT: [PagingStructEntry; 512];
 }
 
 static MAPPER: WithSpinLock<Option<Mapper<X86_64BareMetal>>> = WithSpinLock::new(None);
@@ -86,7 +86,7 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
     arch.flush_tlb();
 
     let mut mapper = Mapper::new(
-        page_structure_base as *mut PagingStruct<X86_64BareMetal>,
+        page_structure_base as *mut PagingStruct,
         0x200000,
         7,
         allocator,

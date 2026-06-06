@@ -68,9 +68,9 @@ struct MappedPage {
 // TODO: make this a trait if we support architectures other than x86_64.
 pub struct Mapper<E>
 where
-    E: Environment + Clone + Default,
+    E: Environment,
 {
-    base: SyncMutPointer<PagingStruct<E>>,
+    base: SyncMutPointer<PagingStruct>,
     length: usize,
     // TODO: Bump style allocation will break with offset mapping.
     //       Use better allocation method
@@ -86,12 +86,9 @@ where
     cow_dest: SyncMutPointer<u8>,
 }
 
-impl<E> Mapper<E>
-where
-    E: Environment + Clone + Default,
-{
+impl<E: Environment> Mapper<E> {
     pub fn new(
-        base: *mut PagingStruct<E>,
+        base: *mut PagingStruct,
         length: usize,
         next: usize,
         page_allocator: PageAllocator,
@@ -114,7 +111,7 @@ where
     }
 
     fn map(&mut self, phys_addr: usize, virt_addr: usize) {
-        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct<E>;
+        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
         let (pdpt, _) = self.walk_or_create_table::<PML4>(pml4, virt_addr);
         let (pd, _) = self.walk_or_create_table::<PDPT>(pdpt, virt_addr);
         let (pt, _) = self.walk_or_create_table::<PD>(pd, virt_addr);
@@ -129,8 +126,10 @@ where
             match phys_page {
                 Some(phys_page) => {
                     phys_page.refs.fetch_add(1, SeqCst);
+                    // // TODO: if mapping is aliased, set RW_FLAG __for every alias__ to 0
                 }
                 None => {
+                    // TODO: if mapping is not aliased, set RW_FLAG to 1
                     self.mapped_pages.insert(
                         phys_addr,
                         MappedPage {
@@ -146,7 +145,7 @@ where
     }
 
     fn unmap(&mut self, virt_addr: usize) -> Option<()> {
-        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct<E>;
+        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
         let (pml4e_addr, _) = self.walk::<PML4>(pml4, virt_addr)?;
         let pdpt = self.table_for_phys_addr(pml4e_addr);
         let (pdpte_addr, pdpte_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
@@ -160,7 +159,7 @@ where
             unsafe {
                 let idx = PDPT::entry_idx(virt_addr);
                 let entry = (*pdpt).get_entry_mut(idx);
-                *entry = PagingStructEntry::<E>::default();
+                *entry = PagingStructEntry::default();
             }
 
             let phys_page = self
@@ -192,7 +191,7 @@ where
             unsafe {
                 let idx = PD::entry_idx(virt_addr);
                 let entry = (*pd).get_entry_mut(idx);
-                *entry = PagingStructEntry::<E>::default();
+                *entry = PagingStructEntry::default();
             }
 
             let phys_page = self
@@ -217,7 +216,7 @@ where
         unsafe {
             let idx = PT::entry_idx(virt_addr);
             let entry = (*pt).get_entry_mut(idx);
-            *entry = PagingStructEntry::<E>::default();
+            *entry = PagingStructEntry::default();
         }
 
         let phys_page =
@@ -259,11 +258,7 @@ where
     }
 
     pub fn phys_addr(&self, virt_addr: usize) -> Option<usize> {
-        let pml4 = unsafe {
-            self.environment
-                .paging_structure_base()
-                .add(E::PAGING_STRUCTURE_BASE)
-        } as *const PagingStruct<E>;
+        let pml4 = unsafe { self.environment.paging_structure_base() } as *const PagingStruct;
 
         let (pml4e_addr, _) = self.walk::<PML4>(pml4, virt_addr)?;
         let pdpt = self.table_for_phys_addr(pml4e_addr);
@@ -283,7 +278,7 @@ where
         Some(pte_addr | (virt_addr & ((1 << PT::SHIFT) - 1)))
     }
 
-    pub fn fork(&mut self, paging_struct_base: *mut PagingStruct<E>) -> usize {
+    pub fn fork(&mut self, paging_struct_base: *mut PagingStruct) -> usize {
         let src_pml4 = paging_struct_base;
         let dst_pml4 = self.new_table();
 
@@ -313,7 +308,7 @@ where
             let dst_pdpt = self.new_table();
             unsafe {
                 (*dst_pml4).get_entry_mut(i).set_flags(flags, true);
-                let dst_table_addr = (*dst_pdpt).phys_addr();
+                let dst_table_addr = (*dst_pdpt).phys_addr::<E>();
                 (*dst_pml4).get_entry_mut(i).set_addr(dst_table_addr)
             }
 
@@ -325,13 +320,13 @@ where
             self.recursively_clone(src_pdpt, dst_pdpt, 3, i << 39);
         }
 
-        unsafe { (*dst_pml4).phys_addr() }
+        unsafe { (*dst_pml4).phys_addr::<E>() }
     }
 
     fn recursively_clone(
         &mut self,
-        src: *mut PagingStruct<E>,
-        dst: *mut PagingStruct<E>,
+        src: *mut PagingStruct,
+        dst: *mut PagingStruct,
         level: usize, // 3: pdpt, 2: pd, 1: pt
         virt_addr: usize,
     ) {
@@ -374,7 +369,7 @@ where
                 let dst_table = self.new_table();
                 unsafe {
                     let dst_entry = (*dst).get_entry_mut(i);
-                    let dst_table_addr = (*dst_table).phys_addr();
+                    let dst_table_addr = (*dst_table).phys_addr::<E>();
                     dst_entry.set_addr(dst_table_addr);
                     dst_entry.set_flags(src_flags, true);
                     dst_entry.set_flags(RW_FLAG, false)
@@ -387,11 +382,7 @@ where
     }
 
     pub fn cow(&mut self, virt_addr: *mut u8) {
-        let pml4 = unsafe {
-            self.environment
-                .paging_structure_base()
-                .add(E::PAGING_STRUCTURE_BASE)
-        } as *const PagingStruct<E>;
+        let pml4 = unsafe { self.environment.paging_structure_base() } as *const PagingStruct;
 
         let (pml4e_addr, _) = self
             .walk::<PML4>(pml4, virt_addr as usize)
@@ -457,16 +448,16 @@ where
         }
     }
 
-    fn new_table(&mut self) -> *mut PagingStruct<E> {
+    fn new_table(&mut self) -> *mut PagingStruct {
         let new_table = unsafe { self.base.0.add(self.next) };
         self.next += 1;
         new_table
     }
 
-    fn table_for_phys_addr(&self, phys_addr: usize) -> *mut PagingStruct<E> {
+    fn table_for_phys_addr(&self, phys_addr: usize) -> *mut PagingStruct {
         unsafe {
             let idx = (E::PAGING_STRUCTURE_BASE + phys_addr - usize::from(&self.base))
-                / size_of::<PagingStruct<E>>();
+                / size_of::<PagingStruct>();
             self.base.0.add(idx)
         }
     }
@@ -476,7 +467,7 @@ where
     /// Returns the **physical address** of the resolved paging structure.
     fn walk<L: PagingLevel>(
         &self,
-        table: *const PagingStruct<E>,
+        table: *const PagingStruct,
         virt_addr: usize,
     ) -> Option<(usize, usize)> {
         let idx = L::entry_idx(virt_addr);
@@ -495,9 +486,9 @@ where
     /// Returns the **physical address** of the resolved or newly created paging structure.
     fn walk_or_create_table<L: PagingLevel>(
         &mut self,
-        table: *mut PagingStruct<E>,
+        table: *mut PagingStruct,
         virt_addr: usize,
-    ) -> (*mut PagingStruct<E>, usize) {
+    ) -> (*mut PagingStruct, usize) {
         match self.walk::<L>(table, virt_addr) {
             Some((next_table, flags)) => {
                 let next_table = self.table_for_phys_addr(next_table);
@@ -510,11 +501,13 @@ where
                 let flags = PRESENT_FLAG | RW_FLAG;
                 unsafe {
                     let entry = (*table).get_entry_mut(idx);
-                    entry.set_addr((*next_table).phys_addr());
+                    entry.set_addr((*next_table).phys_addr::<E>());
                     entry.set_flags(flags, true);
                 }
                 (next_table, flags)
             }
         }
     }
+
+    // fn walk_to_leaf(&self, virt_addr: usize) -> (usize, usize) {}
 }

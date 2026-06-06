@@ -19,4 +19,4 @@ impl Environment for UserlandTest {
     fn flush_tlb(&self) {}
 }
 
-const PAGING_STRUCTURE_REGION_LEN: usize = 0x200000 / size_of::<PagingStruct<UserlandTest>>();
+const PAGING_STRUCTURE_REGION_LEN: usize = 0x200000 / size_of::<PagingStruct>();

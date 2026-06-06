@@ -1,5 +1,4 @@
 use super::*;
-use core::marker::PhantomData;
 use interface::Environment;
 
 /// Present; when 0, the entry is ignored
@@ -47,22 +46,14 @@ pub const ALL_FLAGS: usize = PRESENT_FLAG
 /// A paging structure entry.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-pub struct PagingStructEntry<E>
-where
-    E: Environment + Clone + Default,
-{
+pub struct PagingStructEntry {
     bytes: usize,
-    _phantom: PhantomData<E>,
 }
 
-impl<E> PagingStructEntry<E>
-where
-    E: Environment + Clone + Default,
-{
+impl PagingStructEntry {
     pub const fn new(flags: usize, phys_addr: usize) -> Self {
-        PagingStructEntry::<E> {
+        PagingStructEntry {
             bytes: flags | (phys_addr & MASK_51_12),
-            _phantom: PhantomData::<E>,
         }
     }
 
@@ -84,7 +75,7 @@ where
     }
 
     /// Returns the virtual address of the entry, at offset PAGING_STRUCTURE_BASE.
-    pub fn get_virt_addr(&self) -> usize {
+    pub fn get_virt_addr<E: Environment>(&self) -> usize {
         self.get_addr() + E::PAGING_STRUCTURE_BASE
     }
 
@@ -94,37 +85,28 @@ where
 }
 
 #[repr(C, align(0x1000))]
-pub struct PagingStruct<E>
-where
-    E: Environment + Clone + Default,
-{
-    entries: [PagingStructEntry<E>; 512],
+pub struct PagingStruct {
+    entries: [PagingStructEntry; 512],
 }
 
-impl<E> Default for PagingStruct<E>
-where
-    E: Environment + Clone + Copy + Default,
-{
+impl Default for PagingStruct {
     fn default() -> Self {
         Self {
-            entries: [PagingStructEntry::<E>::default(); 512],
+            entries: [PagingStructEntry::default(); 512],
         }
     }
 }
 
-impl<'a, E> PagingStruct<E>
-where
-    E: Environment + Clone + Default,
-{
-    pub fn get_entry(&'a self, idx: usize) -> &'a PagingStructEntry<E> {
+impl<'a> PagingStruct {
+    pub fn get_entry(&'a self, idx: usize) -> &'a PagingStructEntry {
         &self.entries[idx]
     }
 
-    pub fn get_entry_mut(&'a mut self, idx: usize) -> &'a mut PagingStructEntry<E> {
+    pub fn get_entry_mut(&'a mut self, idx: usize) -> &'a mut PagingStructEntry {
         &mut self.entries[idx]
     }
 
-    pub fn phys_addr(&self) -> usize {
-        self as *const PagingStruct<E> as usize - E::PAGING_STRUCTURE_BASE
+    pub fn phys_addr<E: Environment>(&self) -> usize {
+        self as *const PagingStruct as usize - E::PAGING_STRUCTURE_BASE
     }
 }

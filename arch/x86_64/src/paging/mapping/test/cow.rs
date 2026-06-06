@@ -13,11 +13,11 @@ fn test_cow_tmp_map() {
     allocator.init(&[(fake_page as usize, 0x1000)]);
 
     let paging_struct_layout =
-        core::alloc::Layout::new::<[PagingStruct<UserlandTest>; PAGING_STRUCTURE_REGION_LEN]>();
+        core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(paging_struct_layout) };
     let fake_native = UserlandTest(base);
     let mut mapper = Mapper::new(
-        base as *mut PagingStruct<UserlandTest>,
+        base as *mut PagingStruct,
         0x200000,
         1,
         allocator,
@@ -34,7 +34,7 @@ fn test_cow_tmp_map() {
     let pd_idx = (virt_addr & MASK_29_21) >> 21;
     let pt_idx = (virt_addr & MASK_20_12) >> 12;
 
-    let pml4 = base as *mut PagingStruct<UserlandTest>;
+    let pml4 = base as *mut PagingStruct;
     unsafe {
         let pml4e = (*pml4).get_entry_mut(pml4_idx);
         let (pdpt_phys_addr, pml4e_flags) = (pml4e.get_addr(), pml4e.get_flags(ALL_FLAGS));
@@ -99,11 +99,11 @@ fn test_cow() {
     }
 
     let paging_struct_layout =
-        core::alloc::Layout::new::<[PagingStruct<UserlandTest>; PAGING_STRUCTURE_REGION_LEN]>();
+        core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(paging_struct_layout) };
     let fake_native = UserlandTest(base);
     let mut mapper = Mapper::new(
-        base as *mut PagingStruct<UserlandTest>,
+        base as *mut PagingStruct,
         0x200000,
         1,
         allocator,
@@ -124,7 +124,7 @@ fn test_cow() {
     let pd_idx = (virt_addr & MASK_29_21) >> 21;
     let pt_idx = (virt_addr & MASK_20_12) >> 12;
 
-    let pml4 = base as *mut PagingStruct<UserlandTest>;
+    let pml4 = base as *mut PagingStruct;
     unsafe {
         let pml4e = (*pml4).get_entry_mut(pml4_idx);
         let (pdpt_phys_addr, pml4e_flags) = (pml4e.get_addr(), pml4e.get_flags(ALL_FLAGS));
