@@ -367,45 +367,28 @@ impl<E: Environment> Mapper<E> {
     }
 
     pub fn cow(&mut self, virt_addr: *mut u8) {
-        let pml4 = self.environment.paging_structure_base() as *const PagingStruct;
+        let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
 
-        let (pml4e_addr, _) = self
-            .walk::<PML4>(pml4, virt_addr as usize)
-            .expect("PML4E of mapped page should exist");
-        let pdpt = self.table_for_phys_addr(pml4e_addr);
-        let (pdpte_addr, pdpte_flags) = self
-            .walk::<PDPT>(pdpt, virt_addr as usize)
-            .expect("PDPTE of mapped page should exist");
-        assert_ne!(
-            pdpte_flags & PS_FLAG,
-            PS_FLAG,
-            "Copy-on-write of gigantic pages is unsupported"
-        );
-        let pd = self.table_for_phys_addr(pdpte_addr);
-
-        let (pde_addr, pde_flags) = self
-            .walk::<PD>(pd, virt_addr as usize)
-            .expect("PDE of mapped page should exist");
-        assert_ne!(
-            pde_flags & PS_FLAG,
-            PS_FLAG,
-            "Copy-on-write of huge pages is unsupported"
-        );
-        let pt = self.table_for_phys_addr(pde_addr);
-
-        let (pte_addr, _) = self
-            .walk::<PT>(pt, virt_addr as usize)
-            .expect("PTE of mapped page should exist");
-
-        {
-            let src_phys_page = self
-                .mapped_pages
-                .get(&pte_addr)
-                .expect("Mapped page should be in mapped_pages");
-            assert!(
-                src_phys_page.refs.load(SeqCst) > 1,
-                "Mapped page ref count should be greater than 1"
-            );
+        let leaf = self
+            .walk_to_leaf(pml4, virt_addr as usize)
+            .expect("Page should be mapped");
+        match leaf.page_size {
+            PageSize::Gigantic => {
+                panic!("Copy-on-write of gigantic pages is unsupported");
+            }
+            PageSize::Huge => {
+                panic!("Copy-on-write of huge pages is unsupported");
+            }
+            PageSize::Normal => {
+                let src_phys_page = self
+                    .mapped_pages
+                    .get(&leaf.phys_addr)
+                    .expect("Mapped page should be in mapped_pages");
+                assert!(
+                    src_phys_page.refs.load(SeqCst) > 1,
+                    "Mapped page ref count should be greater than 1"
+                );
+            }
         }
 
         let new_page = self.cow_tmp_map();
