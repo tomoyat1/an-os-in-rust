@@ -1,6 +1,7 @@
 use super::*;
 use crate::paging::table::{
-    PagingStruct, PagingStructEntry, ALL_FLAGS, PRESENT_FLAG, PS_FLAG, RW_FLAG,
+    PagingLevel, PagingStruct, PagingStructEntry, ALL_FLAGS, PD, PDPT, PML4, PRESENT_FLAG, PS_FLAG,
+    PT, RW_FLAG,
 };
 use alloc::collections::BTreeMap;
 use core::ptr;
@@ -15,39 +16,6 @@ use paging_common::physical::{Block, PageAllocator};
 mod test;
 
 const BOOT_PAGE_TABLE_COUNT: usize = 7;
-
-trait PagingLevel {
-    const MASK: usize;
-    const SHIFT: usize;
-
-    fn entry_idx(virt_addr: usize) -> usize {
-        (virt_addr & Self::MASK) >> Self::SHIFT
-    }
-}
-
-struct PML4;
-impl PagingLevel for PML4 {
-    const MASK: usize = MASK_47_39;
-    const SHIFT: usize = 39;
-}
-
-struct PDPT;
-impl PagingLevel for PDPT {
-    const MASK: usize = MASK_38_30;
-    const SHIFT: usize = 30;
-}
-
-struct PD;
-impl PagingLevel for PD {
-    const MASK: usize = MASK_29_21;
-    const SHIFT: usize = 21;
-}
-
-struct PT;
-impl PagingLevel for PT {
-    const MASK: usize = MASK_20_12;
-    const SHIFT: usize = 12;
-}
 
 pub struct SyncMutPointer<T>(*mut T);
 unsafe impl<T> Send for SyncMutPointer<T> {}

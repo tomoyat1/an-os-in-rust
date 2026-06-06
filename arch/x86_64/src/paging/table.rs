@@ -43,6 +43,39 @@ pub const ALL_FLAGS: usize = PRESENT_FLAG
     | GLOBAL_FLAG
     | PAT_FLAG;
 
+pub trait PagingLevel {
+    const MASK: usize;
+    const SHIFT: usize;
+
+    fn entry_idx(virt_addr: usize) -> usize {
+        (virt_addr & Self::MASK) >> Self::SHIFT
+    }
+}
+
+pub struct PML4;
+impl PagingLevel for PML4 {
+    const MASK: usize = MASK_47_39;
+    const SHIFT: usize = 39;
+}
+
+pub struct PDPT;
+impl PagingLevel for PDPT {
+    const MASK: usize = MASK_38_30;
+    const SHIFT: usize = 30;
+}
+
+pub struct PD;
+impl PagingLevel for PD {
+    const MASK: usize = MASK_29_21;
+    const SHIFT: usize = 21;
+}
+
+pub struct PT;
+impl PagingLevel for PT {
+    const MASK: usize = MASK_20_12;
+    const SHIFT: usize = 12;
+}
+
 /// A paging structure entry.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
