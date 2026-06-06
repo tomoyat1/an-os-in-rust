@@ -37,7 +37,7 @@ struct LeafEntry {
     table: *mut PagingStruct,
     phys_addr: usize,
     idx: usize,
-    size: PageSize,
+    page_size: PageSize,
 }
 
 impl<'a> From<&LeafEntry> for &'a mut PagingStructEntry {
@@ -130,7 +130,7 @@ impl<E: Environment> Mapper<E> {
             .walk_to_leaf(virt_addr)
             // TODO: Make this function return a Result
             .expect("Page to be unmapped must be mapped");
-        match leaf.size {
+        match leaf.page_size {
             PageSize::Gigantic => {
                 const MASK: usize = (1 << 30) - 1;
                 assert_eq!(
@@ -196,24 +196,12 @@ impl<E: Environment> Mapper<E> {
     }
 
     pub fn phys_addr(&self, virt_addr: usize) -> Option<usize> {
-        let pml4 = unsafe { self.environment.paging_structure_base() } as *const PagingStruct;
-
-        let (pml4e_addr, _) = self.walk::<PML4>(pml4, virt_addr)?;
-        let pdpt = self.table_for_phys_addr(pml4e_addr);
-        let (pdpte_addr, pdpte_flags) = self.walk::<PDPT>(pdpt, virt_addr)?;
-        if pdpte_flags & PS_FLAG == PS_FLAG {
-            return Some(pdpte_addr | (virt_addr & ((1 << PDPT::SHIFT) - 1)));
+        let leaf = self.walk_to_leaf(virt_addr)?;
+        match leaf.page_size {
+            PageSize::Gigantic => Some(leaf.phys_addr | (virt_addr & ((1 << PDPT::SHIFT) - 1))),
+            PageSize::Huge => Some(leaf.phys_addr | (virt_addr & ((1 << PD::SHIFT) - 1))),
+            PageSize::Normal => Some(leaf.phys_addr | (virt_addr & ((1 << PT::SHIFT) - 1))),
         }
-        let pd = self.table_for_phys_addr(pdpte_addr);
-
-        let (pde_addr, pde_flags) = self.walk::<PD>(pd, virt_addr)?;
-        if pde_flags & PS_FLAG == PS_FLAG {
-            return Some(pde_addr | (virt_addr & ((1 << PD::SHIFT) - 1)));
-        }
-        let pt = self.table_for_phys_addr(pde_addr);
-
-        let (pte_addr, _) = self.walk::<PT>(pt, virt_addr)?;
-        Some(pte_addr | (virt_addr & ((1 << PT::SHIFT) - 1)))
     }
 
     pub fn fork(&mut self, paging_struct_base: *mut PagingStruct) -> usize {
@@ -458,7 +446,7 @@ impl<E: Environment> Mapper<E> {
                 table: pdpt,
                 phys_addr: pdpte_addr,
                 idx: PDPT::entry_idx(virt_addr),
-                size: PageSize::Gigantic,
+                page_size: PageSize::Gigantic,
             });
         }
         let pd = self.table_for_phys_addr(pdpte_addr);
@@ -468,7 +456,7 @@ impl<E: Environment> Mapper<E> {
                 table: pd,
                 phys_addr: pde_addr,
                 idx: PD::entry_idx(virt_addr),
-                size: PageSize::Huge,
+                page_size: PageSize::Huge,
             });
         }
         let pt = self.table_for_phys_addr(pde_addr);
@@ -477,7 +465,7 @@ impl<E: Environment> Mapper<E> {
             table: pt,
             phys_addr: pte_addr,
             idx: PT::entry_idx(virt_addr),
-            size: PageSize::Normal,
+            page_size: PageSize::Normal,
         })
     }
 }
