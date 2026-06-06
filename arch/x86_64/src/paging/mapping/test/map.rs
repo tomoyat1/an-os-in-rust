@@ -65,6 +65,11 @@ fn test_map() {
             "Physical page address should match"
         );
 
+        assert!(
+            mapper.mapped_pages.is_empty(),
+            "mapped_pages should be empty"
+        );
+
         unsafe { alloc::alloc::dealloc(base, layout) };
     }
 }
@@ -158,6 +163,160 @@ fn test_map_userland() {
             *alias, pml4 as usize,
             "pml4 should be the only aliasing paging structure"
         );
+
+        unsafe { alloc::alloc::dealloc(base, layout) };
+    }
+}
+
+#[test]
+fn test_map_userland_aliased() {
+    let allocator = PageAllocator::new();
+    let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
+    let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
+    let fake_native = UserlandTest(base);
+    let mut mapper = Mapper::new(
+        base as *mut PagingStruct,
+        0x200000,
+        1,
+        allocator,
+        fake_native,
+        core::ptr::null_mut(),
+    );
+
+    let phys_addr = 0xdeadb000usize;
+    let virt_addr = 0x1000usize;
+
+    let pml4_idx = (virt_addr & MASK_47_39) >> 39;
+    let pdpt_idx = (virt_addr & MASK_38_30) >> 30;
+    let pd_idx = (virt_addr & MASK_29_21) >> 21;
+    let pt_idx = (virt_addr & MASK_20_12) >> 12;
+
+    let existing_pml4 = mapper.new_table();
+    let existing_pdpt = mapper.new_table();
+    let existing_pd = mapper.new_table();
+    let existing_pt = mapper.new_table();
+
+    // Construct mapping for src_pml4
+    unsafe {
+        let pml4e = (*existing_pml4).get_entry_mut(pml4_idx);
+        pml4e.set_addr((*existing_pdpt).phys_addr::<UserlandTest>());
+        pml4e.set_flags(PRESENT_FLAG | RW_FLAG, true);
+
+        let pdpte = (*existing_pdpt).get_entry_mut(pdpt_idx);
+        pdpte.set_addr((*existing_pd).phys_addr::<UserlandTest>());
+        pdpte.set_flags(PRESENT_FLAG | RW_FLAG, true);
+
+        let pde = (*existing_pd).get_entry_mut(pd_idx);
+        pde.set_addr((*existing_pt).phys_addr::<UserlandTest>());
+        pde.set_flags(PRESENT_FLAG | RW_FLAG, true);
+
+        let pte = (*existing_pt).get_entry_mut(pt_idx);
+        pte.set_addr(phys_addr);
+        pte.set_flags(PRESENT_FLAG, true);
+    }
+    let mut aliasing_paging_structures = BTreeSet::new();
+    aliasing_paging_structures.insert(existing_pml4 as usize);
+    mapper.mapped_pages.insert(
+        phys_addr,
+        MappedPage {
+            phys_addr,
+            size: PageSize::Normal,
+            refs: AtomicUsize::new(1),
+            aliasing_paging_structures,
+        },
+    );
+
+    mapper.map(phys_addr, virt_addr);
+
+    let pml4 = base as *mut PagingStruct;
+    unsafe {
+        let pml4e = (*pml4).get_entry_mut(pml4_idx);
+        let (pdpt_phys_addr, pml4e_flags) = (pml4e.get_addr(), pml4e.get_flags(ALL_FLAGS));
+        assert_eq!(
+            pml4e_flags & PRESENT_FLAG,
+            PRESENT_FLAG,
+            "PML4E should be present"
+        );
+        let pdpt = mapper.table_for_phys_addr(pdpt_phys_addr);
+
+        let pdpte = (*pdpt).get_entry_mut(pdpt_idx);
+        let (pd_phys_addr, pdpte_flags) = (pdpte.get_addr(), pdpte.get_flags(ALL_FLAGS));
+        assert_eq!(
+            pdpte_flags & PRESENT_FLAG,
+            PRESENT_FLAG,
+            "PDPTE should be present"
+        );
+        let pd = mapper.table_for_phys_addr(pd_phys_addr);
+
+        let pde = (*pd).get_entry_mut(pd_idx);
+        let (pt_phys_addr, pde_flags) = (pde.get_addr(), pde.get_flags(ALL_FLAGS));
+        assert_eq!(
+            pde_flags & PRESENT_FLAG,
+            PRESENT_FLAG,
+            "PDE should be present"
+        );
+        let pt = mapper.table_for_phys_addr(pt_phys_addr);
+
+        let pte = (*pt).get_entry_mut(pt_idx);
+        let (page_phys_addr, pte_flags) = (pte.get_addr(), pte.get_flags(ALL_FLAGS));
+        assert_eq!(
+            pte_flags & PRESENT_FLAG,
+            PRESENT_FLAG,
+            "PTE should be present"
+        );
+        assert_eq!(
+            page_phys_addr,
+            phys_addr & MASK_47_12,
+            "Physical page address should match"
+        );
+
+        let mp = mapper
+            .mapped_pages
+            .get(&page_phys_addr)
+            .expect("MappedPage for address should exist");
+
+        assert_eq!(
+            mp.refs.load(SeqCst),
+            2,
+            "Mapped page ref count should be 2 after allocation"
+        );
+        assert_eq!(
+            mp.aliasing_paging_structures.len(),
+            2,
+            "There should be exactly two aliasing paging strcutures"
+        );
+        let _ = mp
+            .aliasing_paging_structures
+            .get(&(existing_pml4 as usize))
+            .expect("Alias existing_pml4 should exist");
+        let _ = mp
+            .aliasing_paging_structures
+            .get(&(base as usize))
+            .expect("Alias base should exist");
+
+        let existing_leaf = mapper
+            .walk_to_leaf(existing_pml4, virt_addr)
+            .expect("virt_addr must be mapped");
+        let entry: &mut PagingStructEntry = (&existing_leaf).into();
+        let existing_flags = entry.get_flags(ALL_FLAGS);
+        assert_eq!(
+            existing_flags & PRESENT_FLAG,
+            PRESENT_FLAG,
+            "PTE should be present"
+        );
+        assert_eq!(existing_flags & RW_FLAG, 0, "PTE should be RO");
+
+        let new_leaf = mapper
+            .walk_to_leaf(base as *mut PagingStruct, virt_addr)
+            .expect("virt_addr must be mapped");
+        let entry: &mut PagingStructEntry = (&new_leaf).into();
+        let new_flags = entry.get_flags(ALL_FLAGS);
+        assert_eq!(
+            new_flags & PRESENT_FLAG,
+            PRESENT_FLAG,
+            "PTE should be present"
+        );
+        assert_eq!(new_flags & RW_FLAG, 0, "PTE should be RO");
 
         unsafe { alloc::alloc::dealloc(base, layout) };
     }
