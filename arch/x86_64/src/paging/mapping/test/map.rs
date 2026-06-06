@@ -142,10 +142,11 @@ fn test_map_userland() {
             .get(&page_phys_addr)
             .expect("MappedPage for address should exist");
 
-        let mp = mapper
-            .mapped_pages
-            .get(&page_phys_addr)
-            .expect("MappedPage for address should exist");
+        assert_eq!(
+            mp.refs.load(SeqCst),
+            1,
+            "Mapped page ref count should be 1 after allocation"
+        );
 
         unsafe { alloc::alloc::dealloc(base, layout) };
     }

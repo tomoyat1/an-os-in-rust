@@ -111,6 +111,10 @@ fn test_cow() {
         fake_dest_page,
     );
 
+    // Map twice to get a reference count of 2.
+    mapper.map(fake_src_page as usize, fake_src_page as usize);
+    mapper.map(fake_src_page as usize, fake_src_page as usize);
+
     mapper.cow(fake_src_page);
 
     // Check if mapping is correct
@@ -163,6 +167,14 @@ fn test_cow() {
             "Physical page address should match"
         );
     }
+
+    let got_refs = mapper
+        .mapped_pages
+        .get(&(fake_src_page as usize))
+        .expect("Mapped page should be in mapoed_pages")
+        .refs
+        .load(SeqCst);
+    assert_eq!(got_refs, 1, "Reference count should be 1 after cow");
 
     // Check if data in src page was copied to dest page.
     unsafe {

@@ -120,20 +120,27 @@ where
         let (pt, _) = self.walk_or_create_table::<PD>(pd, virt_addr);
 
         let idx = (virt_addr & PT::MASK) >> PT::SHIFT;
-        unsafe {
-            let pte = (*pt).get_entry_mut(idx);
-            pte.set_addr(phys_addr & MASK_51_12);
-            pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
-        }
+        let pte = unsafe { (*pt).get_entry_mut(idx) };
+        pte.set_addr(phys_addr & MASK_51_12);
+        pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
+
         if (virt_addr >> 51) == 0 {
-            self.mapped_pages.insert(
-                phys_addr,
-                MappedPage {
-                    phys_addr,
-                    size: PageSize::Normal,
-                    refs: AtomicUsize::new(1),
-                },
-            );
+            let phys_page = self.mapped_pages.get_mut(&pte.get_addr());
+            match phys_page {
+                Some(phys_page) => {
+                    phys_page.refs.fetch_add(1, SeqCst);
+                }
+                None => {
+                    self.mapped_pages.insert(
+                        phys_addr,
+                        MappedPage {
+                            phys_addr,
+                            size: PageSize::Normal,
+                            refs: AtomicUsize::new(1),
+                        },
+                    );
+                }
+            }
         }
         self.environment.flush_tlb();
     }
@@ -272,8 +279,8 @@ where
         }
         let pt = self.table_for_phys_addr(pde_addr);
 
-        let (page, _) = self.walk::<PT>(pt, virt_addr)?;
-        Some(page | (virt_addr & ((1 << PT::SHIFT) - 1)))
+        let (pte_addr, _) = self.walk::<PT>(pt, virt_addr)?;
+        Some(pte_addr | (virt_addr & ((1 << PT::SHIFT) - 1)))
     }
 
     pub fn fork(&mut self, paging_struct_base: *mut PagingStruct<E>) -> usize {
@@ -380,6 +387,52 @@ where
     }
 
     pub fn cow(&mut self, virt_addr: *mut u8) {
+        let pml4 = unsafe {
+            self.environment
+                .paging_structure_base()
+                .add(E::PAGING_STRUCTURE_BASE)
+        } as *const PagingStruct<E>;
+
+        let (pml4e_addr, _) = self
+            .walk::<PML4>(pml4, virt_addr as usize)
+            .expect("PML4E of mapped page should exist");
+        let pdpt = self.table_for_phys_addr(pml4e_addr);
+        let (pdpte_addr, pdpte_flags) = self
+            .walk::<PDPT>(pdpt, virt_addr as usize)
+            .expect("PDPTE of mapped page should exist");
+        assert_ne!(
+            pdpte_flags & PS_FLAG,
+            PS_FLAG,
+            "Copy-on-write of gigantic pages is unsupported"
+        );
+        let pd = self.table_for_phys_addr(pdpte_addr);
+
+        let (pde_addr, pde_flags) = self
+            .walk::<PD>(pd, virt_addr as usize)
+            .expect("PDE of mapped page should exist");
+        assert_ne!(
+            pde_flags & PS_FLAG,
+            PS_FLAG,
+            "Copy-on-write of huge pages is unsupported"
+        );
+        let pt = self.table_for_phys_addr(pde_addr);
+
+        let (pte_addr, _) = self
+            .walk::<PT>(pt, virt_addr as usize)
+            .expect("Copy-on-write of small pages is unsupported");
+
+        {
+            let src_phys_page = self
+                .mapped_pages
+                .get(&pte_addr)
+                .expect("Mapped page should be in mapped_pages");
+            assert!(
+                src_phys_page.refs.load(SeqCst) > 1,
+                "Mapped page ref count should be greater than 1"
+            );
+            src_phys_page.refs.fetch_sub(1, SeqCst);
+        }
+
         let new_page = self.cow_tmp_map();
 
         self.cow_copy(virt_addr, self.cow_dest.0);
