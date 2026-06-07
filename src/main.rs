@@ -57,6 +57,8 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     serial::init();
     serial::tmp_write_com1(b"[OK]\tSerial console initialized\n");
 
+    let mcfg = acpi::parse_mcfg(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
+
     let hpet = acpi::parse_hpet(boot_data.acpi_rsdp);
     let clock = match hpet {
         Ok(hpet) => {
@@ -106,7 +108,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         let ptr = 0x2000 as *mut u32;
         *ptr = 0xcafebabe;
 
-        // Were done handling all unprocessed inputs/outputs. Switch to another task.
+        // We're done handling all unprocessed inputs/outputs. Switch to another task.
         asm!(
             "mov rax, 0x18",
             "int 0x80",

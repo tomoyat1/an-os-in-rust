@@ -122,7 +122,8 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
             | MemoryType::ACPI_NON_VOLATILE
             | MemoryType::LOADER_DATA
             | MemoryType::MMIO
-            | MemoryType::MMIO_PORT_SPACE => {
+            | MemoryType::MMIO_PORT_SPACE
+            | MemoryType::RESERVED => {
                 for p in 0..mdesc.page_count {
                     let phys_addr = (mdesc.phys_start + p * 0x1000) as usize;
                     MAPPER.lock().as_mut().unwrap().map_mmio(phys_addr);
