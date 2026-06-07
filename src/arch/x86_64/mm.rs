@@ -105,16 +105,6 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
         .alloc_page_at(0xffff800000600000);
 
     for mdesc in memory_map {
-        // TODO: Map with KERNEL_BASE offset the following
-        //         - RUNTIME_SERVICES_CODE
-        //         - RUNTIME_SERVICES_DATA
-        //         - ACPI_RECLAIM
-        //         - ACPI_NON_VOLATILE
-        //         - MMIO
-        //         - MMIO_PORT_SPACE
-        //       Requires:
-        //         - Physical page allocator
-        //         - Virtual page allocator
         match mdesc.ty {
             MemoryType::RUNTIME_SERVICES_CODE
             | MemoryType::RUNTIME_SERVICES_DATA
