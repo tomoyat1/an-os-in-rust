@@ -170,3 +170,62 @@ fn test_fork() {
 
     unsafe { alloc::alloc::dealloc(base, layout) };
 }
+
+#[test]
+fn test_fork_shallow_copies_kernel_space() {
+    let allocator = PageAllocator::new();
+    let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
+    let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
+    let fake_native = UserlandTest(base);
+    let mut mapper = Mapper::new(
+        base as *mut PagingStruct,
+        0x200000,
+        1,
+        allocator,
+        fake_native,
+        core::ptr::null_mut(),
+    );
+
+    // A kernel-half address
+    let virt_addr = PAGING_STRUCTURE_BASE;
+    let pml4_idx = (virt_addr & MASK_47_39) >> 39;
+    assert!(pml4_idx >= 256, "virt_addr must be in the kernel half");
+
+    let src_pml4 = base as *mut PagingStruct;
+    let src_pdpt = mapper.new_table();
+
+    unsafe {
+        let pml4e = (*src_pml4).get_entry_mut(pml4_idx);
+        pml4e.set_addr((*src_pdpt).phys_addr::<UserlandTest>());
+        pml4e.set_flags(PRESENT_FLAG | RW_FLAG, true);
+    }
+    let src_pdpt_addr = unsafe { (*src_pml4).get_entry(pml4_idx).get_addr() };
+
+    let new_table_base = mapper.fork(src_pml4);
+    let new_pml4 = mapper.table_for_phys_addr(new_table_base);
+    assert_ne!(
+        new_pml4 as usize, src_pml4 as usize,
+        "Cloned PML4 must be a different table from the source PML4"
+    );
+
+    let (dest_pdpt_addr, dest_pml4e_flags) = unsafe {
+        let entry = (*new_pml4).get_entry(pml4_idx);
+        (entry.get_addr(), entry.get_flags(ALL_FLAGS))
+    };
+    assert_eq!(
+        dest_pml4e_flags & PRESENT_FLAG,
+        PRESENT_FLAG,
+        "Dest PML4E must be present"
+    );
+    assert_eq!(
+        dest_pml4e_flags & RW_FLAG,
+        RW_FLAG,
+        "Dest PML4E flags must be preserved"
+    );
+    assert_eq!(
+        dest_pdpt_addr, src_pdpt_addr,
+        "Dest PML4E must alias the src PDPT"
+    );
+
+    unsafe { alloc::alloc::dealloc(base, layout) };
+}
