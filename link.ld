@@ -28,9 +28,14 @@ SECTIONS
 		. = ALIGN(0x200000);
 		*(.boot_paging_structures)
 		. = ALIGN(0x200000);
-		*(.boot_data)
+		boot_data = .;
 		. += 0x1000;
+		boot_memory_map = .;
+		. += 0x8000;
 		*(.bss)
 	}
 	_kernel_end = .;
+
+	ASSERT(boot_data == 0xffff800000400000, "boot_data must be at phys 0x400000")
+	ASSERT(boot_memory_map == 0xffff800000401000, "boot_memory_map must be at phys 0x401000")
 }

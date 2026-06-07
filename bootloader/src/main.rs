@@ -119,13 +119,16 @@ fn efi_main(handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
         }
     };
 
+    let memory_map_buf = 0x401000 as *mut MemoryDescriptor;
+    unsafe { ptr::copy_nonoverlapping(virt_mmap.as_ptr(), memory_map_buf, virt_mmap.len()) };
+
     let boot_data = 0x400000 as *mut BootData;
 
     let boot_data = unsafe {
         ptr::write(
             boot_data,
             BootData {
-                memory_map_buf: virt_mmap.as_mut_ptr(),
+                memory_map_buf,
                 memory_map_len: virt_mmap.len(),
                 framebuffer: raw_fb,
                 system_table,
