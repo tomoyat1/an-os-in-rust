@@ -1,7 +1,11 @@
 extern crate interface;
 
+use core::fmt::{Display, Formatter};
+
+pub mod error;
 pub mod mapping;
 pub mod table;
+
 pub const MASK_51_12: usize = 0x000f_ffff_ffff_f000;
 pub const MASK_51_30: usize = 0x000f_ffff_ffc0_0000_00;
 pub const MASK_51_21: usize = 0x0000_ffff_fffe_0000_0;
@@ -16,10 +20,21 @@ pub const MASK_20_0: usize = 0x0000_0000_001f_ffff;
 pub const PAGING_STRUCTURE_BASE: usize = 0xffff_ff80_0000_0000;
 pub const MMIO_BASE: usize = 0xffff_ff00_0000_0000;
 
+#[derive(Debug, PartialEq, Eq)]
 enum PageSize {
     Normal,
     Huge,
     Gigantic,
+}
+
+impl Display for PageSize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        match self {
+            PageSize::Normal => write!(f, "4 KiB"),
+            PageSize::Huge => write!(f, "2 MiB"),
+            PageSize::Gigantic => write!(f, "1 GiB"),
+        }
+    }
 }
 
 impl Into<usize> for PageSize {

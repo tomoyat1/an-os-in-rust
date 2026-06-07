@@ -1,4 +1,5 @@
 use super::*;
+use crate::paging::error::PagingError;
 use crate::paging::table::{
     PagingLevel, PagingStruct, PagingStructEntry, ALL_FLAGS, PD, PDPT, PML4, PRESENT_FLAG, PS_FLAG,
     PT, RW_FLAG,
@@ -92,7 +93,15 @@ impl<E: Environment> Mapper<E> {
         }
     }
 
-    fn map(&mut self, phys_addr: usize, virt_addr: usize) {
+    fn map(&mut self, phys_addr: usize, virt_addr: usize) -> Result<(), PagingError> {
+        // TODO: support mapping huge pages
+        const MASK_11_0: usize = (1 << 12) - 1;
+        if phys_addr & MASK_11_0 != 0 {
+            return Err(PagingError::MisalignedAddress(phys_addr, PageSize::Normal));
+        }
+        if virt_addr & MASK_11_0 != 0 {
+            return Err(PagingError::MisalignedAddress(virt_addr, PageSize::Normal));
+        }
         let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
         let (pdpt, _) = self.walk_or_create_table::<PML4>(pml4, virt_addr);
         let (pd, _) = self.walk_or_create_table::<PDPT>(pdpt, virt_addr);
@@ -147,9 +156,10 @@ impl<E: Environment> Mapper<E> {
             }
         }
         self.environment.flush_tlb();
+        Ok(())
     }
 
-    fn unmap(&mut self, virt_addr: usize) {
+    fn unmap(&mut self, virt_addr: usize) -> Result<(), PagingError> {
         let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
         let leaf = self
             .walk_to_leaf(pml4, virt_addr)
@@ -158,27 +168,24 @@ impl<E: Environment> Mapper<E> {
         match leaf.page_size {
             PageSize::Gigantic => {
                 const MASK: usize = (1 << 30) - 1;
-                assert_eq!(
-                    virt_addr & MASK,
-                    0,
-                    "Virtual address must be 1 GiB multiple when unmapping gigantic page."
-                );
+                if virt_addr & MASK != 0 {
+                    return Err(PagingError::MisalignedAddress(
+                        virt_addr,
+                        PageSize::Gigantic,
+                    ));
+                }
             }
             PageSize::Huge => {
                 const MASK: usize = (1 << 21) - 1;
-                assert_eq!(
-                    virt_addr & MASK,
-                    0,
-                    "Virtual address must be 2 MiB multiple when unmapping huge page."
-                );
+                if virt_addr & MASK != 0 {
+                    return Err(PagingError::MisalignedAddress(virt_addr, PageSize::Huge));
+                }
             }
             PageSize::Normal => {
                 const MASK: usize = (1 << 12) - 1;
-                assert_eq!(
-                    virt_addr & MASK,
-                    0,
-                    "Virtual address must be 4 KiB multiple when unmapping huge page."
-                );
+                if virt_addr & MASK != 0 {
+                    return Err(PagingError::MisalignedAddress(virt_addr, PageSize::Normal));
+                }
             }
         }
 
@@ -232,9 +239,10 @@ impl<E: Environment> Mapper<E> {
 
         // TODO: Garbage collection of no longer used paging structures.
         //       This only has meaning once we have memory reclamation in Mapper.
+        Ok(())
     }
 
-    pub fn alloc_page_at(&mut self, virt_addr: usize) {
+    pub fn alloc_page_at(&mut self, virt_addr: usize) -> Result<(), PagingError> {
         let phys_addr = self.page_allocator.allocate(12);
         match phys_addr {
             Some(phys_addr) => self.map(phys_addr.get_addr(), virt_addr),
@@ -366,7 +374,7 @@ impl<E: Environment> Mapper<E> {
         }
     }
 
-    pub fn cow(&mut self, virt_addr: *mut u8) {
+    pub fn cow(&mut self, virt_addr: *mut u8) -> Result<(), PagingError> {
         let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
 
         let leaf = self
@@ -395,9 +403,9 @@ impl<E: Environment> Mapper<E> {
 
         self.cow_copy(virt_addr, self.cow_dest.0);
 
-        self.unmap(virt_addr as usize);
-        self.unmap(usize::from(&self.cow_dest));
-        self.map(new_page.get_addr(), virt_addr as usize);
+        self.unmap(virt_addr as usize)?;
+        self.unmap(usize::from(&self.cow_dest))?;
+        self.map(new_page.get_addr(), virt_addr as usize)
     }
 
     fn cow_tmp_map(&mut self) -> Block {

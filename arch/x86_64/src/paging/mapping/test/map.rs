@@ -19,7 +19,8 @@ fn test_map() {
     // The following is not UserlandTest::PAGING_STRUCTURE_BASE on purpose.
     // Would like to test the mapping on something that is not an identity map.
     let virt_addr = phys_addr + PAGING_STRUCTURE_BASE;
-    mapper.map(phys_addr, virt_addr);
+    let result = mapper.map(phys_addr, virt_addr);
+    assert!(result.is_ok(), "Mapping should succeed");
 
     let pml4_idx = (virt_addr & MASK_47_39) >> 39;
     let pdpt_idx = (virt_addr & MASK_38_30) >> 30;
@@ -318,6 +319,70 @@ fn test_map_userland_aliased() {
         );
         assert_eq!(new_flags & RW_FLAG, 0, "PTE should be RO");
 
+        alloc::alloc::dealloc(base, layout);
+    }
+}
+
+#[test]
+fn test_map_misaligned_phys() {
+    let allocator = PageAllocator::new();
+    let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
+    let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
+    let fake_native = UserlandTest(base);
+    let mut mapper = Mapper::new(
+        base as *mut PagingStruct,
+        0x200000,
+        1,
+        allocator,
+        fake_native,
+        core::ptr::null_mut(),
+    );
+
+    let phys_addr = 0xdeadb100usize;
+    // The following is not UserlandTest::PAGING_STRUCTURE_BASE on purpose.
+    // Would like to test the mapping on something that is not an identity map.
+    let virt_addr = phys_addr + PAGING_STRUCTURE_BASE;
+    let result = mapper.map(phys_addr, virt_addr);
+    assert!(result.is_err(), "Mapping should fail");
+    assert_eq!(
+        result.unwrap_err(),
+        PagingError::MisalignedAddress(phys_addr, PageSize::Normal),
+        "Expected misaligned address error"
+    );
+
+    unsafe {
+        alloc::alloc::dealloc(base, layout);
+    }
+}
+
+#[test]
+fn test_map_misaligned_virt() {
+    let allocator = PageAllocator::new();
+    let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
+    let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
+    let fake_native = UserlandTest(base);
+    let mut mapper = Mapper::new(
+        base as *mut PagingStruct,
+        0x200000,
+        1,
+        allocator,
+        fake_native,
+        core::ptr::null_mut(),
+    );
+
+    let phys_addr = 0xdeadb000usize;
+    // The following is not UserlandTest::PAGING_STRUCTURE_BASE on purpose.
+    // Would like to test the mapping on something that is not an identity map.
+    let virt_addr = phys_addr + PAGING_STRUCTURE_BASE + 0x100;
+    let result = mapper.map(phys_addr, virt_addr);
+    assert!(result.is_err(), "Mapping should fail");
+    assert_eq!(
+        result.unwrap_err(),
+        PagingError::MisalignedAddress(virt_addr, PageSize::Normal),
+        "Expected misaligned address error"
+    );
+
+    unsafe {
         alloc::alloc::dealloc(base, layout);
     }
 }

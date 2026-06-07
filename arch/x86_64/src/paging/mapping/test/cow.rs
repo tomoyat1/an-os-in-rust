@@ -124,8 +124,8 @@ fn test_cow() {
     let src_pd = mapper.new_table();
     let src_pt = mapper.new_table();
 
-    // This is what cr3 points to when cow() is called. Set this to base, which is what UserlandTest
-    // returns.
+    // This is what cr3 points to when cow() is called.
+    // Set this to base, which is what UserlandTest returns.
     let dest_pml4 = base as *mut PagingStruct;
     let dest_pdpt = mapper.new_table();
     let dest_pd = mapper.new_table();
