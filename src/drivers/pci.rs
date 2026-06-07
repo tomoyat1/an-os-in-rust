@@ -33,80 +33,106 @@ impl PCI {
         }
     }
 
+    fn visit_configuration_space(
+        &mut self,
+        n_bus: u32,
+        n_device: u32,
+        n_function: u32,
+        lapic_id: u32,
+    ) -> Option<PCIDevice> {
+        // TODO: get rid of magic number 0x8000_0000
+        let cfg_addr: u32 = 0x8000_0000 | n_bus << 16 | n_device << 11 | n_function << 8;
+        let cfg_data = unsafe {
+            port::outl(CONFIG_ADDRESS, cfg_addr);
+            port::inl(CONFIG_DATA)
+        };
+
+        if cfg_data & 0xffff == 0xffff {
+            // Invalid vendor ID.
+            // Nothing found at bus:device combination.
+            return None;
+        }
+
+        let vendor_id = (cfg_data & 0xffff) as u16;
+        let device_id = ((cfg_data & 0xffff0000) >> 16) as u16;
+
+        let mut device = PCIDevice {
+            bus_number: n_bus as u16,
+            device_number: n_device as u16,
+            function_number: n_function as u8,
+            vendor_id,
+            device_id,
+
+            interrupt_line: 0,
+            interrupt_pin: 0,
+
+            // TODO: properly fill in these fields, and possibly more.
+            subsystem_id: 0,
+            subsystem_vendor_id: 0,
+            msi_capability_pointer: None,
+        };
+
+        unsafe {
+            device.subsystem_vendor_id = (device.inl(0x2c) & 0xffff) as u16;
+            device.subsystem_id = ((device.inl(0x2e) & 0xffff0000) >> 16) as u16;
+            device.interrupt_line = (device.inl(0x3c) & 0xff) as u8;
+            device.interrupt_pin = ((device.inl(0x3c) & 0xff00) >> 8) as u8;
+        }
+
+        // Look for MSI capability structure
+        // TODO: generalize this to enumerate all capabilities in the future.
+        let status = device.read_status_register();
+        if status & 0b10000 != 0 {
+            let mut ptr = REG_CAP_PTR;
+            while ptr != 0 {
+                let (ctrl, n_ptr, cap_id) = {
+                    let v = unsafe { device.inl(ptr) };
+                    ((v & 0xffff0000) >> 16, (v & 0xff00) >> 8, v & 0xff)
+                };
+                if cap_id != 0x05 {
+                    ptr = n_ptr as u16;
+                    continue;
+                }
+                device.msi_capability_pointer = Some(ptr);
+
+                // enable MSI
+                unsafe {
+                    // TODO: this is incorrect. The write needs to be a write to bit 16 of the
+                    //       u32 at capability pointer.
+                    device.outl(ptr, 0x1);
+                };
+
+                // Set the message address. Just use 32-bit address for now.
+                let dest_id: u32 = lapic_id << 12;
+                let addr: u32 = 0xfee00000 | dest_id | (0b00 << 2);
+                unsafe { device.outl(ptr + 0x4, addr) }
+
+                // Set message data.
+                let data: u32 = MSI_VECTOR; // edge triggered, fixed delivery mode
+                unsafe { device.outl(ptr + 0x8, data) }
+
+                break;
+            }
+        }
+        Some(device)
+    }
+
     fn enumerate_pci_bus(&mut self, lapic_id: u32) {
         for n_bus in 0..256 as u32 {
             for n_device in 0..32 as u32 {
-                // We assume single function devices for now.
-                let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11;
-                let cfg_data = unsafe {
-                    port::outl(CONFIG_ADDRESS, cfg_addr);
-                    port::inl(CONFIG_DATA)
-                };
-
-                if cfg_data & 0xffff == 0xffff {
-                    // Invalid vendor ID.
-                    // Nothing found at bus:device combination.
-                    continue;
-                }
-
-                let vendor_id = (cfg_data & 0xffff) as u16;
-                let device_id = ((cfg_data & 0xffff0000) >> 16) as u16;
-
-                let mut device = PCIDevice {
-                    bus_number: n_bus as u16,
-                    device_number: n_device as u16,
-                    vendor_id,
-                    device_id,
-
-                    interrupt_line: 0,
-                    interrupt_pin: 0,
-
-                    // TODO: properly fill in these fields, and possibly more.
-                    subsystem_id: 0,
-                    subsystem_vendor_id: 0,
-                    msi_capability_pointer: None,
-                };
-
-                unsafe {
-                    device.interrupt_line = (device.inl(0x3c, 0) & 0xff) as u8;
-                    device.interrupt_pin = ((device.inl(0x3c, 0) & 0xff00) >> 8) as u8;
-                }
-
-                // Look for MSI capbility struture
-                // TODO: generalize this to enumerate all capabilities in the future.
-                let status = device.read_status_register(0);
-                if status & 0b10000 != 0 {
-                    let mut ptr = REG_CAP_PTR;
-                    while ptr != 0 {
-                        let (ctrl, n_ptr, cap_id) = {
-                            let v = unsafe { device.inl(ptr, 0) };
-                            ((v & 0xffff0000) >> 16, (v & 0xff00) >> 8, v & 0xff)
-                        };
-                        if cap_id != 0x05 {
-                            ptr = n_ptr as u16;
-                            continue;
+                if let Some(device) = self.visit_configuration_space(n_bus, n_device, 0, lapic_id) {
+                    if device.read_header_type() & 0b10000000 == 0b10000000 {
+                        // TODO: read functions 1 to 7
+                        for n_function in 0..8 {
+                            if let Some(device) = self
+                                .visit_configuration_space(n_bus, n_device, n_function, lapic_id)
+                            {
+                                self.devices.push(device)
+                            }
                         }
-                        device.msi_capability_pointer = Some(ptr);
-
-                        // enable MSI
-                        unsafe {
-                            device.outl(ptr, 0x0, 0x1);
-                        };
-
-                        // Set message address. Just use 32 bit address for now.
-                        let dest_id: u32 = lapic_id << 12;
-                        let addr: u32 = 0xfee00000 | dest_id | (0b00 << 2);
-                        unsafe { device.outl(ptr + 0x4, 0, addr) }
-
-                        // Set message data.
-                        let data: u32 = MSI_VECTOR; // edge triggered, fixed delivery mode
-                        unsafe { device.outl(ptr + 0x8, 0, data) }
-
-                        break;
                     }
+                    self.devices.push(device);
                 }
-
-                self.devices.push(device);
             }
         }
     }
@@ -133,6 +159,7 @@ impl PCI {
 pub struct PCIDevice {
     pub(crate) bus_number: u16,
     pub(crate) device_number: u16,
+    pub(crate) function_number: u8,
 
     device_id: u16,
     vendor_id: u16,
@@ -146,10 +173,10 @@ pub struct PCIDevice {
 }
 
 impl PCIDevice {
-    unsafe fn outl(&self, offset: u16, function: u32, data: u32) {
+    unsafe fn outl(&self, offset: u16, data: u32) {
         let n_bus = self.bus_number as u32;
         let n_device = self.device_number as u32;
-        let function: u32 = (function & 0b111) << 8;
+        let function: u32 = (self.function_number as u32 & 0b111) << 8;
         let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | offset as u32;
 
         // Set register to write to.
@@ -159,10 +186,10 @@ impl PCIDevice {
         port::outl(CONFIG_DATA, data)
     }
 
-    unsafe fn inl(&self, offset: u16, function: u32) -> u32 {
+    unsafe fn inl(&self, offset: u16) -> u32 {
         let n_bus = self.bus_number as u32;
         let n_device = self.device_number as u32;
-        let function: u32 = (function & 0b111) << 8;
+        let function: u32 = (self.function_number as u32 & 0b111) << 8;
         let cfg_addr: u32 =
             0x80000000 | n_bus << 16 | n_device << 11 | function | (offset & 0xFC) as u32;
 
@@ -173,32 +200,36 @@ impl PCIDevice {
         port::inl(CONFIG_DATA)
     }
 
-    pub fn read_control_register(&self, function: u32) -> u16 {
-        let read = unsafe { self.inl(0x4, function) };
+    pub fn read_control_register(&self) -> u16 {
+        let read = unsafe { self.inl(0x4) };
         (read & 0x0000FFFF) as u16
     }
 
-    pub fn write_control_register(&self, control: u16, function: u32) {
+    pub fn write_control_register(&self, control: u16) {
         let status: u32 = 0x0 << 16;
         let data = status | control as u32;
-        unsafe { self.outl(0x4, function, data) }
+        unsafe { self.outl(0x4, data) }
     }
 
-    pub fn read_status_register(&self, function: u32) -> u16 {
-        let read = unsafe { self.inl(0x4, function) };
+    pub fn read_status_register(&self) -> u16 {
+        let read = unsafe { self.inl(0x4) };
         ((read & 0xffff0000) >> 16) as u16
     }
 
-    pub fn read_bar0(&self, function: u32) -> u32 {
-        let header_type: u8 = ((unsafe { self.inl(0xC, function) } & 0x00FF0000) >> 16) as u8;
-        match header_type {
-            0x0 => unsafe { self.inl(0x10, function) },
+    fn read_header_type(&self) -> u8 {
+        ((unsafe { self.inl(0xC) } & 0x00FF0000) >> 16) as u8
+    }
+
+    pub fn read_bar0(&self) -> u32 {
+        let header_type: u8 = self.read_header_type();
+        match (header_type & 0b1111111) {
+            0x0 => unsafe { self.inl(0x10) },
             _ => 0,
         }
     }
 
-    pub fn write_bar1(&self, function: u32, data: u32) {
-        unsafe { self.outl(0x10, function, data) }
+    pub fn write_bar1(&self, data: u32) {
+        unsafe { self.outl(0x10, data) }
     }
 }
 

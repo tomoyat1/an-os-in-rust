@@ -31,6 +31,10 @@ pub struct HPET {
     pub(crate) page_protection: u8,
 }
 
+pub struct MCFG {
+    pub configurations: vec::Vec<ConfigurationSpaceBaseAddressAllocationStructure>,
+}
+
 #[repr(C)]
 struct _MADT {
     // LAPIC name comes from x86,
@@ -54,6 +58,30 @@ struct _HPET {
     hpet_number: u8,
     minimum_tick: u16,
     page_protection: u8,
+}
+
+#[repr(C, packed)]
+struct _MCFG {
+    signature: [u8; 4],
+    length: u32,
+    revision: u8,
+    checksum: u8,
+    oemid: [u8; 6],
+    oem_table_id: [u8; 8],
+    oem_revision: u32,
+    creator_id: [u8; 4],
+    creator_revision: u32,
+    reserved: u64,
+}
+
+#[repr(C, packed)]
+#[derive(Clone)]
+struct ConfigurationSpaceBaseAddressAllocationStructure {
+    base_address: u64,
+    segment_group_number: u16,
+    start_bus_number: u8,
+    end_bus_number: u8,
+    reserved: u32,
 }
 
 #[repr(C)]
@@ -133,6 +161,22 @@ pub fn parse_hpet(rsdp: *const core::ffi::c_void) -> Result<HPET, String> {
         };
     }
     Err("could not find HPET".to_string())
+}
+
+pub fn parse_mcfg(rsdp: *const core::ffi::c_void) -> Result<MCFG, String> {
+    let (xsdt_entry_addr, len) = _parse_xsdt(rsdp);
+    for e in 0..len {
+        let entry_addr =
+            unsafe { ptr::read_unaligned(xsdt_entry_addr.offset(e as isize)) } + mm::MMIO_BASE;
+        let header = unsafe { ptr::read_unaligned(entry_addr as *const DescriptionHeader) };
+        let signature = core::str::from_utf8(&header.signature).expect("failed to parse signature");
+
+        match signature {
+            "MCFG" => return Ok(_parse_mcfg(entry_addr, header.length)),
+            _ => {}
+        };
+    }
+    Err("could not find MCFG".to_string())
 }
 
 #[repr(C)]
@@ -275,4 +319,18 @@ fn _parse_hpet(hpet_addr: usize, length: u32) -> HPET {
         .unwrap()
         .map_mmio(hpet_info.base_address - mm::MMIO_BASE);
     hpet_info
+}
+
+fn _parse_mcfg(mcfg_addr: usize, length: u32) -> MCFG {
+    let mcfg = mcfg_addr as *const _MCFG;
+    let mcfg = unsafe { &*mcfg };
+    let mut configurations = vec::Vec::new();
+    let mut offset = mcfg_addr + 44;
+    while offset < mcfg_addr + length as usize {
+        let config = (offset as *const ConfigurationSpaceBaseAddressAllocationStructure);
+        let config = unsafe { &*config };
+        configurations.push(config.clone());
+        offset += 16;
+    }
+    MCFG { configurations }
 }

@@ -136,8 +136,8 @@ impl RTL8139 {
         };
         let rtl8139 = Arc::new(rtl8139);
 
-        // Enable bus mastering and IOEN. This lets PCI device to perform DMA.
-        rtl8139.pci.write_control_register(0x0005, 0);
+        // Enable bus mastering and IOEN. This lets the PCI device to perform DMA.
+        rtl8139.pci.write_control_register(0x0005);
 
         // Power on device
         unsafe {
@@ -197,7 +197,7 @@ impl RTL8139 {
         // RTL8139 driver should own the cached field.
 
         // TODO: support multiple function devices.
-        let bar_0 = self.pci.read_bar0(0);
+        let bar_0 = self.pci.read_bar0();
         let base = match bar_0 & 0x1 {
             // Memory space BAR
             0 => bar_0 & !0xf,
