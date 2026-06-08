@@ -251,8 +251,8 @@ impl PCIDevice {
         }
     }
 
-    pub fn write_bar1(&self, data: u32) {
-        unsafe { self.outl(0x10, data) }
+    pub fn write_bar_register(&self, bar: BarNumber, data: u32) {
+        unsafe { self.outl(0x10 + (usize::from(bar) as u16) * 4, data) }
     }
 }
 
