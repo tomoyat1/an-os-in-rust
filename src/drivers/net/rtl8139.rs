@@ -8,7 +8,7 @@ use core::hint::spin_loop;
 
 use crate::arch::x86_64::interrupt::{register_handler, IOAPIC, LOCAL_APIC};
 use crate::arch::x86_64::{mm, port};
-use crate::drivers::pci::PCIDevice;
+use crate::drivers::pci::{BarNumber, PCIDevice};
 use crate::drivers::{acpi, pci};
 use crate::net::ethernet;
 
@@ -193,11 +193,11 @@ impl RTL8139 {
 
     #[inline]
     fn ioaddr(&self, offset: u16) -> u16 {
-        // If calls to pci.read_bar0() get to slow we should cache the address in RAM.
+        // If calls to pci.read_bar_register() get too slow we should cache the address in RAM.
         // RTL8139 driver should own the cached field.
 
         // TODO: support multiple function devices.
-        let bar_0 = self.pci.read_bar0();
+        let bar_0 = self.pci.read_bar_register(BarNumber::BAR0);
         let base = match bar_0 & 0x1 {
             // Memory space BAR
             0 => bar_0 & !0xf,

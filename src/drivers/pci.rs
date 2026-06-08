@@ -20,6 +20,28 @@ pub fn init(lapic_id: u32) {
     pci.enumerate_pci_bus(lapic_id);
 }
 
+pub enum BarNumber {
+    BAR0,
+    BAR1,
+    BAR2,
+    BAR3,
+    BAR4,
+    BAR5,
+}
+
+impl From<BarNumber> for usize {
+    fn from(bar_num: BarNumber) -> usize {
+        match bar_num {
+            BarNumber::BAR0 => 0,
+            BarNumber::BAR1 => 1,
+            BarNumber::BAR2 => 2,
+            BarNumber::BAR3 => 3,
+            BarNumber::BAR4 => 4,
+            BarNumber::BAR5 => 5,
+        }
+    }
+}
+
 pub struct PCI {
     devices: Vec<PCIDevice>,
 }
@@ -220,10 +242,11 @@ impl PCIDevice {
         ((unsafe { self.inl(0xC) } & 0x00FF0000) >> 16) as u8
     }
 
-    pub fn read_bar0(&self) -> u32 {
+    pub fn read_bar_register(&self, bar: BarNumber) -> u32 {
         let header_type: u8 = self.read_header_type();
-        match (header_type & 0b1111111) {
-            0x0 => unsafe { self.inl(0x10) },
+        match header_type & 0b1111111 {
+            // BAR0 lives at config offset 0x10, with each subsequent BAR 4 bytes after.
+            0x0 => unsafe { self.inl(0x10 + (usize::from(bar) as u16) * 4) },
             _ => 0,
         }
     }
