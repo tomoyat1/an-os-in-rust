@@ -16,11 +16,12 @@ bootlib = { path = "./bootlib" }
 paging = { path = "./paging" }
 x86_64 = { path = "./arch/x86_64" }
 x86_64_bare_metal = { path = "arch/x86_64/bare_metal" }
+util = { path = "./util" }
 spin = "0.10.0"
 interface = { path = "./arch/interface" }
 
 [workspace]
-members = ["bootloader", "bootlib", "paging", "arch/x86_64", "arch/x86_64/bare_metal", "arch/interface"]
+members = ["bootloader", "bootlib", "paging", "arch/x86_64", "arch/x86_64/bare_metal", "arch/interface", "util"]
 
 [profile.dev]
 debug = true
