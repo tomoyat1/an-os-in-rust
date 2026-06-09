@@ -11,22 +11,13 @@ use core::sync::atomic::Ordering::SeqCst;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use interface::Environment;
 use paging_common::physical::{Block, PageAllocator};
+use util::pointer::SyncMutPointer;
 
 #[cfg(test)]
 #[path = "./mapping/test/mod.rs"]
 mod test;
 
 const BOOT_PAGE_TABLE_COUNT: usize = 7;
-
-pub struct SyncMutPointer<T>(*mut T);
-unsafe impl<T> Send for SyncMutPointer<T> {}
-unsafe impl<T> Sync for SyncMutPointer<T> {}
-
-impl<T> From<&SyncMutPointer<T>> for usize {
-    fn from(base: &SyncMutPointer<T>) -> usize {
-        base.0 as usize
-    }
-}
 
 struct MappedPage {
     phys_addr: usize,
