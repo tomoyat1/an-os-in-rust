@@ -80,10 +80,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
                 (start, until)
             };
             let current_task = {
-                let task = self
-                    .task_list
-                    .current_task()
-                    .expect("Current task must exist");
+                let task = current_task();
                 self.task_list.set_runnable(task, false);
                 task
             };

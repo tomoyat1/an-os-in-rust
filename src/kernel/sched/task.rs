@@ -47,12 +47,6 @@ impl TaskList {
         }
     }
 
-    pub fn current_task(&self) -> Option<TaskHandle> {
-        let id = self.current?;
-        let _ = self.tasks.get(&id)?;
-        Some(TaskHandle(id))
-    }
-
     pub fn set_current_task(&mut self, id: TaskHandle, now: u64) {
         self.current = Some(id.into());
         let mut task = self
