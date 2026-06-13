@@ -236,6 +236,24 @@ impl TaskList {
         id
     }
 }
+
+// TODO: make this generic over the Registers type.
+#[repr(C, align(0x2000))]
+pub(crate) struct Task {
+    info: TaskInfo,
+    stack: [u8; (KERNEL_STACK_SIZE - size_of::<TaskInfo>())],
+}
+
+impl Task {
+    pub(crate) fn get_handle(&self) -> TaskHandle {
+        TaskHandle(self.info.task_id)
+    }
+
+    pub(crate) fn get_run_until(&self) -> u64 {
+        self.info.run_until
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub(crate) struct TaskInfo {
@@ -268,18 +286,20 @@ impl Ord for TaskInfo {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct TaskHandle(usize);
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub(crate) struct TaskFlags(u32);
 
-impl fmt::Display for TaskHandle {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+impl TaskFlags {
+    fn is_runnable(&self) -> bool {
+        (self.0 & 1) != 0
     }
-}
 
-impl From<TaskHandle> for usize {
-    fn from(value: TaskHandle) -> Self {
-        value.0
+    fn set_is_runnable(&mut self, is_runnable: bool) {
+        match is_runnable {
+            true => self.0 |= 1,
+            false => self.0 &= !1,
+        }
     }
 }
 
@@ -295,38 +315,18 @@ struct Registers {
     cr3: usize,
 }
 
-// TODO: put this data structure behind a lock
-// TODO: make this generic over the Registers type.
-#[repr(C, align(0x2000))]
-pub(crate) struct Task {
-    info: TaskInfo,
-    stack: [u8; (KERNEL_STACK_SIZE - size_of::<TaskInfo>())],
-}
+#[derive(Copy, Clone)]
+pub struct TaskHandle(usize);
 
-impl Task {
-    pub(crate) fn get_handle(&self) -> TaskHandle {
-        TaskHandle(self.info.task_id)
-    }
-
-    pub(crate) fn get_run_until(&self) -> u64 {
-        self.info.run_until
+impl fmt::Display for TaskHandle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-#[repr(C)]
-pub(crate) struct TaskFlags(u32);
-
-impl TaskFlags {
-    fn is_runnable(&self) -> bool {
-        (self.0 & 1) != 0
-    }
-
-    fn set_is_runnable(&mut self, is_runnable: bool) {
-        match is_runnable {
-            true => self.0 |= 1,
-            false => self.0 &= !1,
-        }
+impl From<TaskHandle> for usize {
+    fn from(value: TaskHandle) -> Self {
+        value.0
     }
 }
 
