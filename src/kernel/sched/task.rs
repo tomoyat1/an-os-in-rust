@@ -20,6 +20,7 @@ use x86_64_bare_metal::X86_64BareMetal;
 
 pub const KERNEL_STACK_SIZE: usize = 0x2000;
 const TASK_STRUCT_MASK: usize = (KERNEL_STACK_SIZE - 1) ^ 0xffff_ffff_ffff_ffff;
+const ACTUAL_STACK_SIZE: usize = KERNEL_STACK_SIZE - size_of::<TaskInfo>();
 
 extern "C" {
     #[link_name = "boot_stack_top"]
@@ -147,10 +148,9 @@ impl TaskList {
             (*ptr).info.flags = TaskFlags(0x1);
             (*ptr).info.last_scheduled = 0;
             (*ptr).info.total_runtime = 0;
-            (*ptr).stack = [0; KERNEL_STACK_SIZE - size_of::<TaskInfo>()];
+            (*ptr).stack = [0; ACTUAL_STACK_SIZE];
 
-            (&mut (*ptr)).stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>() - 8)
-                ..(KERNEL_STACK_SIZE - size_of::<TaskInfo>())]
+            (&mut (*ptr)).stack[(ACTUAL_STACK_SIZE - 8)..ACTUAL_STACK_SIZE]
                 .copy_from_slice(&(_task_entry as usize).to_le_bytes());
             Box::from_raw(ptr)
         };
@@ -160,12 +160,11 @@ impl TaskList {
             .get_mut(&id)
             .expect("Newly created Task must exist!");
         unsafe {
-            kernel_stack.stack[(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 16
-                ..(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 8]
+            kernel_stack.stack[(ACTUAL_STACK_SIZE) - 16..ACTUAL_STACK_SIZE - 8]
                 .copy_from_slice(&id.to_le_bytes());
         }
         kernel_stack.info.registers.stack_top = &(kernel_stack.stack
-            [(KERNEL_STACK_SIZE - size_of::<TaskInfo>()) - 8 - size_of::<usize>() * 6])
+            [ACTUAL_STACK_SIZE - 8 - size_of::<usize>() * 6])
             as *const u8 as usize;
         self.schedulable.push(kernel_stack.info);
         TaskHandle(id)
@@ -223,7 +222,7 @@ impl TaskList {
 #[repr(C, align(0x2000))]
 pub(crate) struct Task {
     info: TaskInfo,
-    stack: [u8; (KERNEL_STACK_SIZE - size_of::<TaskInfo>())],
+    stack: [u8; ACTUAL_STACK_SIZE],
 }
 
 impl Task {
