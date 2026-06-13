@@ -54,10 +54,10 @@ impl TaskList {
     }
 
     pub fn set_current_task(&mut self, id: TaskHandle, now: u64) {
-        self.current = Some(id.0);
+        self.current = Some(id.into());
         let mut task = self
             .tasks
-            .get_mut(&id.0)
+            .get_mut(&id.into())
             .expect("The task set as current must exist");
         task.info.last_scheduled = now;
     }
@@ -68,22 +68,25 @@ impl TaskList {
     }
 
     pub fn get_mut(&mut self, id: TaskHandle) -> &mut Task {
-        let task = self.tasks.get_mut(&id.0).unwrap();
+        let task = self.tasks.get_mut(&id.into()).unwrap();
         task.as_mut()
     }
 
     pub fn get_ptr(&self, id: TaskHandle) -> *const Task {
-        let task = self.tasks.get(&id.0).expect("Task must exist for handle!");
+        let task = self
+            .tasks
+            .get(&id.into())
+            .expect("Task must exist for handle!");
         task.as_ref()
     }
 
     // TODO: ensure at type level that this is only called on a running task, and not on a runnable
     //       or blocked one.
-    pub fn update_runtime(&mut self, task: &Task, timestamp: u64) {
+    pub fn update_runtime(&mut self, id: TaskHandle, timestamp: u64) {
         let task_count = self.tasks.len();
         let task = self
             .tasks
-            .get_mut(&task.info.task_id)
+            .get_mut(&id.into())
             .expect("Task must exist for handle!");
         let delta = timestamp - task.info.last_scheduled;
         let delta = delta * task_count as u64;
@@ -99,7 +102,7 @@ impl TaskList {
     pub fn get_run_until(&self, id: TaskHandle) -> u64 {
         let task = self
             .tasks
-            .get(&usize::from(id))
+            .get(&id.into())
             .expect("Task must exist for handle");
         task.info.run_until
     }
@@ -108,7 +111,7 @@ impl TaskList {
         let len = self.tasks.len() as u64;
         let task = self
             .tasks
-            .get_mut(&usize::from(id))
+            .get_mut(&id.into())
             .expect("Task must exist for handle");
         task.info.run_until = begin_at + SCHED_LATENCY / len;
     }
@@ -120,14 +123,14 @@ impl TaskList {
         if runnable {
             let task = self
                 .tasks
-                .get_mut(&usize::from(id))
+                .get_mut(&id.into())
                 .expect("Task with issued handle must exist");
             task.info.flags = TaskFlags(0x1);
             self.schedulable.push(task.info)
         } else {
             let mut task = self
                 .tasks
-                .get_mut(&usize::from(id))
+                .get_mut(&id.into())
                 .expect("Task with issued handle must exist");
             task.info.flags = TaskFlags(0x0)
         }
@@ -348,18 +351,16 @@ unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGu
     some_task();
 }
 
-pub(crate) fn current_task<'a>() -> &'a Task {
+pub(crate) fn current_task() -> TaskHandle {
     // SAFETY: When a Task is created, its Task struct is placed at the bottom of the 8192-byte
     //         kernel stack, or the top of the 8192 contiguous bytes of memory allocated.
     //         Once created, it is never moved or deallocated until the Task ends. Therefore, it is
     //         safe to mask %rsp to get the top of the 8192-byte region of memory that it points to
-    //         and use that as the address of the Task struct.
-    let task = unsafe {
+    //         and read the task identity stored there.
+    unsafe {
         let rsp: usize;
         asm!("mov {}, rsp", out(reg) rsp);
-        let task = rsp & TASK_STRUCT_MASK;
-        let task = task as *const Task;
-        &*task
-    };
-    task
+        let task = (rsp & TASK_STRUCT_MASK) as *const Task;
+        (*task).get_handle()
+    }
 }

@@ -125,7 +125,7 @@ pub unsafe extern "C" fn some_task() {
         writeln!(
             serial::Handle::new(),
             "Yo! from some task: {:}",
-            current.get_handle()
+            current
         );
 
         // Sleep for 1000 ms with nanosleep:

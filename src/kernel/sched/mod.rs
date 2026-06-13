@@ -48,7 +48,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
         self.task_list.set_current_task(switch_to, now);
         self.task_list.set_run_until(switch_to, now);
 
-        let switch_from = self.task_list.get_ptr(switch_from.get_handle());
+        let switch_from = self.task_list.get_ptr(switch_from);
         let switch_to = self.task_list.get_ptr(switch_to);
 
         let mut scheduler = ManuallyDrop::new(self);
@@ -116,8 +116,8 @@ pub(crate) fn lock() -> WithSpinLockGuard<'static, Scheduler> {
 #[unsafe(no_mangle)]
 extern "C" fn check_runtime() {
     let now = hpet::get_time();
-    let mut scheduler = SCHEDULER.lock();
-    if current_task().get_run_until() <= now {
+    let scheduler = SCHEDULER.lock();
+    if scheduler.task_list.get_run_until(current_task()) <= now {
         scheduler.switch()
     }
 }
