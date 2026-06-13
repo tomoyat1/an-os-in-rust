@@ -61,11 +61,6 @@ impl TaskList {
         Some(TaskHandle(id))
     }
 
-    pub fn get_mut(&mut self, id: TaskHandle) -> &mut Task {
-        let task = self.tasks.get_mut(&id.into()).unwrap();
-        task.as_mut()
-    }
-
     pub fn get_ptr(&self, id: TaskHandle) -> *const Task {
         let task = self
             .tasks
@@ -221,10 +216,6 @@ impl TaskList {
         self.current = Some(id);
     }
 
-    pub fn len(&self) -> usize {
-        self.tasks.len()
-    }
-
     fn create_task(&mut self, mut kernel_stack: Box<Task>) -> usize {
         let id = self.next_task_id;
         kernel_stack.info.task_id = self.next_task_id;
@@ -244,10 +235,6 @@ pub(crate) struct Task {
 impl Task {
     pub(crate) fn get_handle(&self) -> TaskHandle {
         TaskHandle(self.info.task_id)
-    }
-
-    pub(crate) fn get_run_until(&self) -> u64 {
-        self.info.run_until
     }
 }
 
