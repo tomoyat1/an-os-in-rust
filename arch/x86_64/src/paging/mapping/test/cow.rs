@@ -27,7 +27,7 @@ fn test_cow_tmp_map() {
 
     let new_page = mapper.cow_tmp_map();
 
-    let virt_addr = mapper.cow_dest.0 as usize;
+    let virt_addr = mapper.cow_dest as usize;
     let phys_addr = new_page.get_addr();
     let pml4_idx = (virt_addr & MASK_47_39) >> 39;
     let pdpt_idx = (virt_addr & MASK_38_30) >> 30;

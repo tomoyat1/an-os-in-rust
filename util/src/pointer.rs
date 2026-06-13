@@ -1,8 +1,18 @@
 use core::ops::Deref;
 
-pub struct SyncMutPointer<T>(pub *mut T);
+pub struct SyncMutPointer<T>(*mut T);
 unsafe impl<T> Send for SyncMutPointer<T> {}
 unsafe impl<T> Sync for SyncMutPointer<T> {}
+
+impl<T> SyncMutPointer<T> {
+    pub unsafe fn new(ptr: *mut T) -> Self {
+        SyncMutPointer(ptr)
+    }
+
+    pub fn as_ptr(&self) -> *mut T {
+        self.0
+    }
+}
 
 impl<T> Deref for SyncMutPointer<T> {
     type Target = T;
@@ -15,11 +25,5 @@ impl<T> Deref for SyncMutPointer<T> {
 impl<T> From<&SyncMutPointer<T>> for usize {
     fn from(base: &SyncMutPointer<T>) -> usize {
         base.0 as usize
-    }
-}
-
-impl<T> From<*mut T> for SyncMutPointer<T> {
-    fn from(base: *mut T) -> SyncMutPointer<T> {
-        SyncMutPointer(base)
     }
 }

@@ -11,7 +11,6 @@ use core::sync::atomic::Ordering::SeqCst;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use interface::Environment;
 use paging_common::physical::{Block, PageAllocator};
-use util::pointer::SyncMutPointer;
 
 #[cfg(test)]
 #[path = "./mapping/test/mod.rs"]
@@ -44,11 +43,11 @@ pub struct Mapper<E>
 where
     E: Environment,
 {
-    base: SyncMutPointer<PagingStruct>,
+    base: *mut PagingStruct,
     length: usize,
     // TODO: Bump style allocation will break with offset mapping.
     //       Use better allocation method
-    next: usize,
+    next: AtomicUsize,
 
     // Contains representations of mapped physical pages, _only for userland half_.
     mapped_pages: BTreeMap<usize, MappedPage>,
@@ -57,8 +56,19 @@ where
     environment: E,
 
     // Address to temporarily map pages to when copying data from aliased RO page to fresh page.
-    cow_dest: SyncMutPointer<u8>,
+    cow_dest: *mut u8,
 }
+
+// SAFETY: No public method of Mapper hands out references to any value internal to it.
+//         Mappers can be safely sent to different threads.
+unsafe impl<E: Environment> Send for Mapper<E> {}
+
+// SAFETY: `base *mut PagingStruct` is safe to be Sync because it is only used as a pointer to the
+//         base of a bump allocator for PagingStructs. No &mut PagingStruct is ever created from it,
+//         and the individual PagingStructs that are handed out from the region are non-overlapping,
+//         and each thread given a PagingStruct has unique access to it.
+//         TODO: Safety for the `cow_base: *mut u8` still needs to be proved.
+unsafe impl<E: Environment> Sync for Mapper<E> {}
 
 impl<E: Environment> Mapper<E> {
     pub fn new(
@@ -74,13 +84,14 @@ impl<E: Environment> Mapper<E> {
             write_bytes(ptr, 0u8, length - BOOT_PAGE_TABLE_COUNT * 0x1000);
         }
         Mapper {
-            base: base.into(),
+            base,
             length,
-            next,
+            next: next.into(),
             mapped_pages: BTreeMap::new(),
             page_allocator,
             environment,
-            cow_dest: cow_dest.into(),
+            // SAFETY: I don't know.
+            cow_dest,
         }
     }
 
@@ -392,10 +403,10 @@ impl<E: Environment> Mapper<E> {
 
         let new_page = self.cow_tmp_map();
 
-        self.cow_copy(virt_addr, self.cow_dest.0);
+        self.cow_copy(virt_addr, self.cow_dest);
 
         self.unmap(virt_addr as usize)?;
-        self.unmap(usize::from(&self.cow_dest))?;
+        self.unmap(self.cow_dest as usize)?;
         self.map(new_page.get_addr(), virt_addr as usize)
     }
 
@@ -404,7 +415,7 @@ impl<E: Environment> Mapper<E> {
             .page_allocator
             .allocate(12)
             .expect("Physical memory exhausted!");
-        self.map(new_page.get_addr(), usize::from(&self.cow_dest));
+        self.map(new_page.get_addr(), self.cow_dest as usize);
         new_page
     }
 
@@ -416,16 +427,16 @@ impl<E: Environment> Mapper<E> {
     }
 
     fn new_table(&mut self) -> *mut PagingStruct {
-        let new_table = unsafe { self.base.0.add(self.next) };
-        self.next += 1;
+        let n = self.next.fetch_add(1, Ordering::AcqRel);
+        let new_table = unsafe { self.base.add(n) };
         new_table
     }
 
     fn table_for_phys_addr(&self, phys_addr: usize) -> *mut PagingStruct {
         unsafe {
-            let idx = (E::PAGING_STRUCTURE_BASE + phys_addr - usize::from(&self.base))
+            let idx = (E::PAGING_STRUCTURE_BASE + phys_addr - (self.base as usize))
                 / size_of::<PagingStruct>();
-            self.base.0.add(idx)
+            self.base.add(idx)
         }
     }
 
