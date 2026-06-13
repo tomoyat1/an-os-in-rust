@@ -307,7 +307,7 @@ impl From<TaskHandle> for usize {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>) {
     {
         let mut scheduler = unsafe { ptr::read(scheduler) };

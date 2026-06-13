@@ -40,7 +40,7 @@ mod locking;
 
 mod net;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 /// start() is the entry point for kernel code.
 /// # Arguments
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
@@ -122,11 +122,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 pub unsafe extern "C" fn some_task() {
     loop {
         let current = sched::current_task();
-        writeln!(
-            serial::Handle::new(),
-            "Yo! from some task: {:}",
-            current
-        );
+        writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
 
         // Sleep for 1000 ms with nanosleep:
         asm!(

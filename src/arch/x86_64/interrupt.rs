@@ -171,13 +171,13 @@ pub fn init(madt: &acpi::MADT) -> u32 {
     lapic_id
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn general_protection_fault_handler() {
     let foo = 1 + 1;
     /* no-op */
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn ps2_keyboard_handler() {
     let foo = 1 + 1;
     let mut lapic = LOCAL_APIC.lock();
@@ -185,7 +185,7 @@ unsafe extern "C" fn ps2_keyboard_handler() {
     /* no-op */
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn pit_handler() {
     // no-op
     // TODO: Do stuff with tick
@@ -194,14 +194,14 @@ unsafe extern "C" fn pit_handler() {
     lapic.write(0xb0, 0)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn hpet_handler() {
     hpet::hpet_tick();
     let mut lapic = LOCAL_APIC.lock();
     lapic.write(0xb0, 0)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn syscall_handler(
     syscall_number: u64,
     arg0: *const c_void,
@@ -230,7 +230,7 @@ unsafe extern "C" fn syscall_handler(
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn com0_handler() {
     serial::read_com1();
     let mut lapic = LOCAL_APIC.lock();
@@ -244,7 +244,7 @@ pub fn register_handler(vector: u8, handler: extern "C" fn(u64)) {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn device_handler(vector: u64) {
     // SAFETY: NOT safe, because the static mut [usize; 128] is not behind any lock.
     let handler = unsafe { IRQ_HANDLERS[vector as usize] } as *const ();
