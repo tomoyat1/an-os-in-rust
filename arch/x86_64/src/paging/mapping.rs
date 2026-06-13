@@ -74,13 +74,13 @@ impl<E: Environment> Mapper<E> {
             write_bytes(ptr, 0u8, length - BOOT_PAGE_TABLE_COUNT * 0x1000);
         }
         Mapper {
-            base: SyncMutPointer(base),
+            base: base.into(),
             length,
             next,
             mapped_pages: BTreeMap::new(),
             page_allocator,
             environment,
-            cow_dest: SyncMutPointer(cow_dest),
+            cow_dest: cow_dest.into(),
         }
     }
 

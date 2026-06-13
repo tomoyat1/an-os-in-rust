@@ -17,3 +17,9 @@ impl<T> From<&SyncMutPointer<T>> for usize {
         base.0 as usize
     }
 }
+
+impl<T> From<*mut T> for SyncMutPointer<T> {
+    fn from(base: *mut T) -> SyncMutPointer<T> {
+        SyncMutPointer(base)
+    }
+}
