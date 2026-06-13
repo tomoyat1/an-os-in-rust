@@ -109,19 +109,13 @@ impl TaskList {
         // O(n) complexity over number of tasks in the queue.
         self.schedulable.retain(|x| x.task_id != id.into());
 
+        let task = self
+            .tasks
+            .get_mut(&id.into())
+            .expect("Task with issued handle must exist");
+        task.info.flags.set_is_runnable(runnable);
         if runnable {
-            let task = self
-                .tasks
-                .get_mut(&id.into())
-                .expect("Task with issued handle must exist");
-            task.info.flags = TaskFlags(0x1);
             self.schedulable.push(task.info)
-        } else {
-            let mut task = self
-                .tasks
-                .get_mut(&id.into())
-                .expect("Task with issued handle must exist");
-            task.info.flags = TaskFlags(0x0)
         }
     }
 
