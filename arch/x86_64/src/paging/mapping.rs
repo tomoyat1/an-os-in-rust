@@ -54,9 +54,6 @@ where
 
     page_allocator: PageAllocator,
     environment: E,
-
-    // Address to temporarily map pages to when copying data from aliased RO page to fresh page.
-    cow_dest: *mut u8,
 }
 
 // SAFETY: No public method of Mapper hands out references to any value internal to it.
@@ -67,7 +64,6 @@ unsafe impl<E: Environment> Send for Mapper<E> {}
 //         base of a bump allocator for PagingStructs. No &mut PagingStruct is ever created from it,
 //         and the individual PagingStructs that are handed out from the region are non-overlapping,
 //         and each thread given a PagingStruct has unique access to it.
-//         TODO: Safety for the `cow_base: *mut u8` still needs to be proved.
 unsafe impl<E: Environment> Sync for Mapper<E> {}
 
 impl<E: Environment> Mapper<E> {
@@ -77,7 +73,6 @@ impl<E: Environment> Mapper<E> {
         next: usize,
         page_allocator: PageAllocator,
         environment: E,
-        cow_dest: *mut u8,
     ) -> Self {
         let ptr = unsafe { base.add(7) } as *mut u8;
         unsafe {
@@ -90,8 +85,6 @@ impl<E: Environment> Mapper<E> {
             mapped_pages: BTreeMap::new(),
             page_allocator,
             environment,
-            // SAFETY: I don't know.
-            cow_dest,
         }
     }
 
@@ -376,7 +369,7 @@ impl<E: Environment> Mapper<E> {
         }
     }
 
-    pub fn cow(&mut self, virt_addr: *mut u8) -> Result<(), PagingError> {
+    pub fn cow(&mut self, virt_addr: *mut u8, scratch: *mut u8) -> Result<(), PagingError> {
         let pml4 = self.environment.paging_structure_base() as *mut PagingStruct;
 
         let leaf = self
@@ -401,21 +394,21 @@ impl<E: Environment> Mapper<E> {
             }
         }
 
-        let new_page = self.cow_tmp_map();
+        let new_page = self.cow_tmp_map(scratch);
 
-        self.cow_copy(virt_addr, self.cow_dest);
+        self.cow_copy(virt_addr, scratch);
 
         self.unmap(virt_addr as usize)?;
-        self.unmap(self.cow_dest as usize)?;
+        self.unmap(scratch as usize)?;
         self.map(new_page.get_addr(), virt_addr as usize)
     }
 
-    fn cow_tmp_map(&mut self) -> Block {
+    fn cow_tmp_map(&mut self, scratch: *mut u8) -> Block {
         let new_page = self
             .page_allocator
             .allocate(12)
             .expect("Physical memory exhausted!");
-        self.map(new_page.get_addr(), self.cow_dest as usize);
+        self.map(new_page.get_addr(), scratch as usize);
         new_page
     }
 

@@ -13,7 +13,6 @@ fn test_phys_addr() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0xdeadbeefusize;
@@ -69,7 +68,6 @@ fn test_phys_addr_huge_page() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     // 2 MiB aligned physical address
@@ -117,7 +115,6 @@ fn test_phys_addr_gigantic_page() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     // 1 GiB aligned physical address

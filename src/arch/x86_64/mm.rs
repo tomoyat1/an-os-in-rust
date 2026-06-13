@@ -39,6 +39,7 @@ static MAPPER: WithSpinLock<Option<Mapper<X86_64BareMetal>>> = WithSpinLock::new
 
 pub const KERNEL_BASE: usize = 0xffff_8000_0000_0000;
 pub use x86_64::paging::MMIO_BASE;
+const SCRATCH: *mut u8 = 0xffff_ffff_c000_0000 as *mut u8;
 
 /// init_mm() (re)-initializes paging data structures for kernel execution.
 pub fn init_mm(memory_map: &[MemoryDescriptor]) {
@@ -92,7 +93,6 @@ pub fn init_mm(memory_map: &[MemoryDescriptor]) {
         allocator,
         arch,
         // TODO: Make this a static variable, for provenance
-        0xffff_ffff_c000_0000 as *mut u8,
     );
     {
         let mut m = MAPPER.lock();
@@ -204,7 +204,11 @@ unsafe extern "C" fn page_fault_handler(error_code: usize, virt_addr: usize) {
         return;
     }
     if error_code & RW_FLAG == RW_FLAG {
-        MAPPER.lock().as_mut().unwrap().cow(virt_addr as *mut u8);
+        MAPPER
+            .lock()
+            .as_mut()
+            .unwrap()
+            .cow(virt_addr as *mut u8, SCRATCH);
         return;
     }
     asm!("cli; hlt");

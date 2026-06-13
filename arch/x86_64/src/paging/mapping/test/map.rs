@@ -12,7 +12,6 @@ fn test_map() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0xdeadb000usize;
@@ -87,7 +86,6 @@ fn test_map_userland() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0xdeadb000usize;
@@ -181,7 +179,6 @@ fn test_map_userland_aliased() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0xdeadb000usize;
@@ -335,7 +332,6 @@ fn test_map_misaligned_phys() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0xdeadb100usize;
@@ -367,7 +363,6 @@ fn test_map_misaligned_virt() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0xdeadb000usize;

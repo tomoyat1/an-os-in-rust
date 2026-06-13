@@ -22,12 +22,11 @@ fn test_cow_tmp_map() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
-    let new_page = mapper.cow_tmp_map();
+    let new_page = mapper.cow_tmp_map(core::ptr::null_mut());
 
-    let virt_addr = mapper.cow_dest as usize;
+    let virt_addr = core::ptr::null_mut::<u8>() as usize;
     let phys_addr = new_page.get_addr();
     let pml4_idx = (virt_addr & MASK_47_39) >> 39;
     let pdpt_idx = (virt_addr & MASK_38_30) >> 30;
@@ -108,7 +107,6 @@ fn test_cow() {
         1,
         allocator,
         fake_native,
-        fake_dest_page,
     );
 
     let phys_addr = fake_src_page as usize;
@@ -187,7 +185,7 @@ fn test_cow() {
     mp.aliasing_paging_structures
         .insert((dest_pml4 as usize, fake_src_page as usize));
 
-    mapper.cow(fake_src_page);
+    mapper.cow(fake_src_page, fake_dest_page);
 
     // Check if mapping is correct
     let pml4_idx = (virt_addr & MASK_47_39) >> 39;

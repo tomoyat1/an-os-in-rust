@@ -14,7 +14,6 @@ fn test_fork() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0x0000_b000usize;
@@ -183,7 +182,6 @@ fn test_fork_shallow_copies_kernel_space() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     // A kernel-half address

@@ -14,7 +14,6 @@ fn test_unmap() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0x0000_b000usize;
@@ -119,7 +118,6 @@ fn test_unmap_userland_aliased() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0x0000_b000usize;
@@ -266,7 +264,6 @@ fn test_unmap_misaligned() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0x0000_b100usize;
@@ -340,7 +337,6 @@ fn test_unmap_huge_misaligned() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0x0010_0000usize;
@@ -408,7 +404,6 @@ fn test_unmap_gigantic_misaligned() {
         1,
         allocator,
         fake_native,
-        core::ptr::null_mut(),
     );
 
     let phys_addr = 0x4100_0000usize;
