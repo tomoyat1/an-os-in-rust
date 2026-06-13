@@ -9,6 +9,7 @@ extern crate alloc;
 extern crate bootlib;
 extern crate paging;
 extern crate rlibc;
+extern crate util;
 extern crate x86_64;
 extern crate x86_64_bare_metal;
 
@@ -24,6 +25,7 @@ use arch::x86_64::{hpet, pit};
 
 mod boot;
 mod drivers;
+use crate::drivers::ahci;
 use drivers::acpi;
 use drivers::net::rtl8139;
 use drivers::pci;
@@ -82,6 +84,8 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     } else {
         serial::tmp_write_com1(b"[OK]\tNo NICs found\n")
     }
+
+    ahci::init();
 
     // Create several tasks to demonstrate switching.
     {
