@@ -50,7 +50,7 @@ impl TaskList {
 
     pub fn set_current_task(&mut self, id: TaskHandle, now: u64) {
         self.current = Some(id.into());
-        let mut task = self
+        let task = self
             .tasks
             .get_mut(&id.into())
             .expect("The task set as current must exist");
@@ -130,7 +130,7 @@ impl TaskList {
             .tasks
             .get(&self.current.unwrap())
             .expect("New task creation attempted before boot task initialization.");
-        let mut kernel_stack = unsafe {
+        let kernel_stack = unsafe {
             let layout = Layout::new::<Task>();
             let ptr = alloc(layout) as *mut Task;
 
@@ -172,7 +172,7 @@ impl TaskList {
 
     pub fn init_idle_task(&mut self) {
         // We only read the address
-        let mut idle_task_stack = unsafe { &raw mut boot_stack };
+        let idle_task_stack = unsafe { &raw mut boot_stack };
 
         // SAFETY: The idle_task_stack never goes out of scope as long as the kernel is running.
         //         Therefore, it is safe to pretend that the memory for the stack was allocated
