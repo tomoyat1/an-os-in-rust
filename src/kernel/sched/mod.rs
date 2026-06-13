@@ -44,7 +44,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
         let switch_to = self
             .task_list
             .next()
-            .unwrap_or(self.task_list.get(0).expect("Kernel task 0 must exist."));
+            .unwrap_or_else(|| self.task_list.get(0).expect("Kernel task 0 must exist."));
         self.task_list.set_current_task(switch_to, now);
         self.task_list.set_run_until(switch_to, now);
 
