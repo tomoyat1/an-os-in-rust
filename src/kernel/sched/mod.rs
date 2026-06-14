@@ -98,6 +98,17 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
             panic!("system clock is uninitialized");
         }
     }
+
+    /// Wakes the specified Task.
+    pub(crate) fn wake(&mut self, task: TaskHandle) {
+        self.task_list.set_runnable(task, true);
+    }
+
+    /// Blocks the currently running Task.
+    pub(crate) fn block(mut self) {
+        self.task_list.set_runnable(current_task(), false);
+        self.switch()
+    }
 }
 
 pub(crate) fn init() {
