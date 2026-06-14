@@ -24,36 +24,65 @@ impl Semaphore {
     }
 
     pub fn wait(&self) {
-        while self
-            .count
-            .try_update(AcqRel, Acquire, |u| if u > 0 { Some(u - 1) } else { None })
-            .is_err()
-        {
+        loop {
+            let scheduler = sched::lock();
+            let ok = self
+                .count
+                .try_update(AcqRel, Acquire, |u| if u > 0 { Some(u - 1) } else { None })
+                .is_ok();
+            if ok {
+                break;
+            }
             self.waiting.lock().push_back(sched::current_task());
-            sched::lock().block();
+            scheduler.block();
         }
-        if let Some(releasing_task) = self.releasing.lock().pop_front() {
+        let releasing_task = self.releasing.lock().pop_front();
+        if let Some(releasing_task) = releasing_task {
             sched::lock().wake(releasing_task);
         }
     }
 
     pub fn release(&self) {
-        while !self.try_release() {
+        loop {
+            let scheduler = sched::lock();
+            let ok = self
+                .count
+                .try_update(AcqRel, Acquire, |u| {
+                    if u < self.max {
+                        Some(u + 1)
+                    } else {
+                        None
+                    }
+                })
+                .is_ok();
+            if ok {
+                break;
+            }
             self.releasing.lock().push_back(sched::current_task());
-            sched::lock().block();
+            scheduler.block();
+        }
+        let waiting_task = self.waiting.lock().pop_front();
+        if let Some(waiting_task) = waiting_task {
+            sched::lock().wake(waiting_task);
         }
     }
 
-    /// Releases without blocking. Returns `false` if the semaphore is already at `max`.
     pub fn try_release(&self) -> bool {
         if self
             .count
-            .try_update(AcqRel, Acquire, |u| if u < self.max { Some(u + 1) } else { None })
+            .try_update(AcqRel, Acquire, |u| {
+                if u < self.max {
+                    Some(u + 1)
+                } else {
+                    None
+                }
+            })
             .is_err()
         {
             return false;
         }
-        if let Some(waiting_task) = self.waiting.lock().pop_front() {
+        let waiting_task = self.waiting.lock().pop_front();
+        if let Some(waiting_task) = waiting_task {
             sched::lock().wake(waiting_task);
         }
         true
