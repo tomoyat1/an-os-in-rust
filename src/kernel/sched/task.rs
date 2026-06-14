@@ -125,10 +125,10 @@ impl TaskList {
         Some(TaskHandle(next.task_id))
     }
 
-    pub fn new_task(&mut self) -> TaskHandle {
+    pub fn new_task(&mut self, entry: fn()) -> TaskHandle {
         let current_task = self
             .tasks
-            .get(&self.current.unwrap())
+            .get(&current_task().0)
             .expect("New task creation attempted before boot task initialization.");
         let kernel_stack = unsafe {
             let layout = Layout::new::<Task>();
@@ -152,6 +152,8 @@ impl TaskList {
 
             (&mut (*ptr)).stack[(ACTUAL_STACK_SIZE - 8)..ACTUAL_STACK_SIZE]
                 .copy_from_slice(&(_task_entry as usize).to_le_bytes());
+            (&mut (*ptr)).stack[(ACTUAL_STACK_SIZE - 24)..(ACTUAL_STACK_SIZE - 16)]
+                .copy_from_slice(&(entry as usize).to_le_bytes());
             Box::from_raw(ptr)
         };
         let id = self.create_task(kernel_stack);
@@ -308,7 +310,11 @@ impl From<TaskHandle> for usize {
 }
 
 #[unsafe(no_mangle)]
-unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>) {
+unsafe fn task_entry(
+    task_id: usize,
+    entry: fn(),
+    scheduler: *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>,
+) {
     {
         let mut scheduler = unsafe { ptr::read(scheduler) };
         // Drop the scheduler RAII guard to release the lock.
@@ -322,7 +328,7 @@ unsafe fn task_entry(task_id: usize, scheduler: *mut ManuallyDrop<WithSpinLockGu
     asm!("sti");
 
     // Actual code that the task starts running
-    some_task();
+    entry();
 }
 
 pub(crate) fn current_task() -> TaskHandle {

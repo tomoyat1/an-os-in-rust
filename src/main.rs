@@ -86,15 +86,15 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     // Create several tasks to demonstrate switching.
     {
         let mut scheduler = sched::lock();
-        scheduler.new_task();
+        scheduler.new_task(some_task);
     }
     {
         let mut scheduler = sched::lock();
-        scheduler.new_task();
+        scheduler.new_task(some_task);
     }
     {
         let mut scheduler = sched::lock();
-        scheduler.new_task();
+        scheduler.new_task(some_task);
     }
 
     // Start kernel main loop, where we handle queued data from interrupts.
@@ -117,22 +117,23 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
     }
 }
 
-#[unsafe(no_mangle)]
 /// This is a placeholder for actual code that a newly created task would run.
-pub unsafe extern "C" fn some_task() {
+fn some_task() {
     loop {
         let current = sched::current_task();
         writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
 
         // Sleep for 1000 ms with nanosleep:
-        asm!(
+        unsafe {
+            asm!(
             "mov rax, 0x23",
             "mov rdi, {arg0:r}",
             "int 0x80",
             out("rax") _,
             out("rdi") _,
             arg0 = in(reg) 1_000_000_000,
-        );
+            );
+        }
     }
 }
 

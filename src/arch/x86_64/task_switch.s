@@ -17,9 +17,10 @@ _do_switch:
     popq %r14
     popq %r13
     popq %r12
-    popq %rbx
+    popq %rbx // -24..-16
     popq %rbp
 
+    // Copy third parameter fo _do_switch() to return value
     mov %rdx, %rax
 
     retq
@@ -28,5 +29,6 @@ _do_switch:
 .type _task_entry, @function
 _task_entry:
     movq %rbp, %rdi
-    movq %rax, %rsi
+    movq %rbx, %rsi
+    movq %rax, %rdx
     call task_entry

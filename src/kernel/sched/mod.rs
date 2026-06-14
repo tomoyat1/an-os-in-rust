@@ -10,7 +10,9 @@ use core::mem::ManuallyDrop;
 use core::ptr;
 
 mod task;
+pub(crate) use crate::some_task;
 pub(crate) use task::current_task;
+pub(crate) use task::TaskHandle;
 
 const SCHED_LATENCY: u64 = 20_000_000; // 20 ms.
 
@@ -62,8 +64,8 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
         };
     }
 
-    pub(crate) fn new_task(&mut self) -> task::TaskHandle {
-        self.task_list.new_task()
+    pub(crate) fn new_task(&mut self, entry: fn()) -> TaskHandle {
+        self.task_list.new_task(entry)
     }
 
     pub(crate) fn sleep(mut self, ns: u64) {
