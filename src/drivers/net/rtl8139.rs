@@ -1,8 +1,8 @@
-use crate::serial::Handle;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::fmt::Write;
 use core::hint::spin_loop;
 
@@ -10,11 +10,14 @@ use crate::arch::x86_64::interrupt::{register_handler, IOAPIC, LOCAL_APIC};
 use crate::arch::x86_64::{mm, port};
 use crate::drivers::pci::{BarNumber, PCIDevice};
 use crate::drivers::{acpi, pci};
+use crate::kernel::sched;
+use crate::locking::semaphore::Semaphore;
+use crate::locking::spinlock::WithSpinLock;
 use crate::net::ethernet;
+use crate::serial::Handle;
 
 // For debugging
 use crate::drivers::serial;
-use crate::locking::spinlock::WithSpinLock;
 
 pub static NICS: WithSpinLock<Vec<Arc<RTL8139>>> = WithSpinLock::new(Vec::new());
 
@@ -69,31 +72,35 @@ pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
 
     for pci_dev in devices {
         if let Ok(rtl8139) = RTL8139::init(pci_dev) {
-            let mapping = interrupt_mappings
-                .iter()
-                .filter(|x| x.irq_number == rtl8139.pci.interrupt_line)
-                .next();
-            if let Some(mapping) = mapping {
-                // Register the interrupt handler.
-                register_handler(rtl8139.vector, rtl8139_handler);
+            {
+                let mapping = interrupt_mappings
+                    .iter()
+                    .filter(|x| x.irq_number == rtl8139.pci.interrupt_line)
+                    .next();
+                if let Some(mapping) = mapping {
+                    // Register the interrupt handler.
+                    register_handler(rtl8139.vector, rtl8139_handler);
 
-                // SAFETY: Not really safe yet.
-                unsafe {
-                    let lapic_id = LOCAL_APIC.lock().id();
-                    let ioapic = IOAPIC.lock();
+                    // SAFETY: Not really safe yet.
+                    unsafe {
+                        let lapic_id = LOCAL_APIC.lock().id();
+                        let ioapic = IOAPIC.lock();
 
-                    // Set up IDT vector with the I/O APIC. Map global_system_interrupt to any open IDT vector.
-                    // We know that 0x26 is empty.
-                    ioapic.remap(
-                        0,
-                        mapping.global_system_interrupt as u32,
-                        rtl8139.vector as u32,
-                    );
+                        // Set up IDT vector with the I/O APIC. Map global_system_interrupt to any open IDT vector.
+                        // We know that 0x26 is empty.
+                        ioapic.remap(
+                            0,
+                            mapping.global_system_interrupt as u32,
+                            rtl8139.vector as u32,
+                        );
+                    }
                 }
             }
             nics.push(rtl8139)
         }
     }
+    let mut s = sched::lock();
+    s.new_task(rtl8139_bottom_half);
     nics.len()
 }
 
@@ -112,7 +119,10 @@ pub struct RTL8139 {
     pub(crate) vector: u8,
 
     // The RX buffer
-    rx_buf: Box<RxBuf>,
+    rx_buf: WithSpinLock<Box<RxBuf>>,
+
+    // Semaphore for the pending irq count.
+    pending_irqs: Semaphore,
 }
 
 impl RTL8139 {
@@ -131,8 +141,9 @@ impl RTL8139 {
         //       Need to design the locking mechanism first.
         let rtl8139 = RTL8139 {
             pci,
-            rx_buf,
+            rx_buf: WithSpinLock::new(rx_buf),
             vector: 0x26, // We magically know that this vector is empty, for now.
+            pending_irqs: Semaphore::new(128),
         };
         let rtl8139 = Arc::new(rtl8139);
 
@@ -153,7 +164,7 @@ impl RTL8139 {
         };
 
         // Init recv buffer
-        let rx_buf_virt_addr = rtl8139.rx_buf.buf.as_ptr() as usize;
+        let rx_buf_virt_addr = rtl8139.rx_buf.lock().buf.as_ptr() as usize;
         let rx_buf_addr = mm::phys_addr(rx_buf_virt_addr);
         match rx_buf_addr {
             Some(rx_buf_addr) => unsafe { rtl8139.outl(REG_RBSTART, rx_buf_addr as u32) },
@@ -183,7 +194,7 @@ impl RTL8139 {
 
         // Set up interrupts.
         // 0x0005 sets the ROK and TOK bits, which means we get interrupts when successfully
-        // send or receive packets.
+        //  sending or receiving packets.
         unsafe {
             rtl8139.outw(REG_IMR, 0x0005 | 1 << 4);
         }
@@ -231,6 +242,8 @@ impl RTL8139 {
     }
 
     fn handle_interrupt(&self) {
+        self.pending_irqs.wait();
+
         // SAFETY: Not confirmed to be safe yet.
         let status = unsafe { self.inw(REG_ISR) };
 
@@ -260,9 +273,9 @@ impl RTL8139 {
 
         // The whole unread portion of the rx buffer. May contain multiple frames.
         let mut rx = if cbr < capr {
-            &self.rx_buf.buf[capr..RX_BUF_SIZE + cbr]
+            &self.rx_buf.lock().buf[capr..RX_BUF_SIZE + cbr]
         } else {
-            &self.rx_buf.buf[capr..cbr]
+            &self.rx_buf.lock().buf[capr..cbr]
         };
         loop {
             // Receive status register.
@@ -335,19 +348,39 @@ impl RTL8139 {
 //       ISRs will call the common stub handler, passing the vector as an argument like how it's done below.
 #[unsafe(no_mangle)]
 pub extern "C" fn rtl8139_handler(vector: u64) {
-    // This is bad
-
-    // SAFETY: not safe. We will probably deadlock if we try to send and receive at the same time.
-    let nics = unsafe { NICS.lock() };
+    let nics = {
+        // SAFETY: We are getting an exclusive lock in ISR context, which has interrupts disabled.
+        //         We are also not calling any blocking functions, so there is no risk of a deadlock.
+        let nics = unsafe { NICS.lock() };
+        nics.iter()
+            .filter(|n| n.vector == vector as u8)
+            .map(|n| n.clone())
+            .collect::<Vec<Arc<RTL8139>>>()
+    };
     for n in nics.iter() {
-        if n.vector != vector as u8 {
-            continue;
+        let status = unsafe { n.inw(REG_ISR) };
+        if status != 0 {
+            n.pending_irqs.try_release();
         }
-        n.handle_interrupt();
     }
 
     unsafe {
         let lapic = LOCAL_APIC.lock();
         lapic.end_of_interrupt();
+    }
+}
+
+#[unsafe(no_mangle)]
+pub fn rtl8139_bottom_half() {
+    let mut nics = Vec::<Arc<RTL8139>>::new();
+    {
+        for n in NICS.lock().iter() {
+            nics.push(n.clone());
+        }
+    }
+    loop {
+        for nic in nics.iter() {
+            nic.handle_interrupt();
+        }
     }
 }
