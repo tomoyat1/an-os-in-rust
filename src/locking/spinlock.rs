@@ -1,9 +1,8 @@
-use core::arch::asm;
+use crate::arch::x86_64::interrupt::{disable_interrupts, enable_interrupts, interrupts_enabled};
+
 use core::ops::{Deref, DerefMut};
 use core::ptr::drop_in_place;
 use spin::MutexGuard;
-
-use crate::kernel::sched;
 
 pub struct WithSpinLock<A> {
     inner: spin::Mutex<A>,
@@ -17,41 +16,28 @@ impl<A> WithSpinLock<A> {
     }
 
     pub fn lock(&self) -> WithSpinLockGuard<A> {
-        // Disable interrupts to prevent deadlocks.
-        let rflags: u64;
-        unsafe {
-            asm!(
-            "pushfq",
-            "pop {reg}",
-            reg = out(reg) rflags
-            )
-        }
-        let interrupt_enabled = (rflags >> 9) & 1 != 0;
-        if interrupt_enabled {
-            unsafe { asm!("cli") };
-        }
-
-        let guard = self.inner.lock();
+        let was_enabled = interrupts_enabled();
+        disable_interrupts();
 
         WithSpinLockGuard {
-            inner: guard,
-            interrupt_enabled,
+            inner: self.inner.lock(),
+            was_enabled,
         }
     }
 }
 
 pub struct WithSpinLockGuard<'a, T> {
     inner: MutexGuard<'a, T>,
-    interrupt_enabled: bool,
+    was_enabled: bool,
 }
 
 impl<'a, T> Drop for WithSpinLockGuard<'a, T> {
     fn drop(&mut self) {
         unsafe {
-            // self.inner should be dropped before sti
+            // Release the lock before restoring interrupts.
             drop_in_place(&mut self.inner);
-            if self.interrupt_enabled {
-                asm!("sti");
+            if self.was_enabled {
+                enable_interrupts()
             }
         }
     }

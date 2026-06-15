@@ -171,6 +171,29 @@ pub fn init(madt: &acpi::MADT) -> u32 {
     lapic_id
 }
 
+/// Returns whether interrupts (`IF`) are currently enabled.
+pub fn interrupts_enabled() -> bool {
+    let rflags: u64;
+    unsafe {
+        asm!("pushfq", "pop {}", out(reg) rflags);
+    }
+    (rflags >> 9) & 1 != 0
+}
+
+/// Enables interrupts by setting the interrupt flag (`sti`).
+pub fn enable_interrupts() {
+    unsafe {
+        asm!("sti");
+    }
+}
+
+/// Disables interrupts by clearing the interrupt flag (`cli`).
+pub fn disable_interrupts() {
+    unsafe {
+        asm!("cli");
+    }
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn general_protection_fault_handler() {
     let foo = 1 + 1;

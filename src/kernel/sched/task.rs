@@ -1,7 +1,8 @@
 use crate::arch::x86_64::hpet;
+use crate::arch::x86_64::interrupt::interrupts_enabled;
 use crate::arch::x86_64::mm::mapper;
+use crate::kernel::sched::SchedulerGuard;
 use crate::kernel::sched::{Scheduler, SCHED_LATENCY};
-use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 use crate::some_task;
 
 use alloc::alloc::alloc;
@@ -148,6 +149,7 @@ impl TaskList {
             (*ptr).info.flags = TaskFlags(0x1);
             (*ptr).info.last_scheduled = 0;
             (*ptr).info.total_runtime = 0;
+            (*ptr).info.interrupt_enabled = true;
             (*ptr).stack = [0; ACTUAL_STACK_SIZE];
 
             (&mut (*ptr)).stack[(ACTUAL_STACK_SIZE - 8)..ACTUAL_STACK_SIZE]
@@ -204,6 +206,7 @@ impl TaskList {
             run_until: 0,
             total_runtime: 0,
             flags: TaskFlags(0x1),
+            interrupt_enabled: interrupts_enabled(),
         };
         let id = self.create_task(idle_task_stack);
 
@@ -242,6 +245,7 @@ pub(crate) struct TaskInfo {
     run_until: u64,
     total_runtime: u64,
     pub(crate) flags: TaskFlags,
+    interrupt_enabled: bool,
 }
 
 impl PartialEq for TaskInfo {
@@ -310,28 +314,17 @@ impl From<TaskHandle> for usize {
 }
 
 #[unsafe(no_mangle)]
-unsafe fn task_entry(
-    task_id: usize,
-    entry: fn(),
-    scheduler: *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>,
-) {
+unsafe fn task_entry(task_id: usize, entry: fn(), scheduler: *mut ManuallyDrop<SchedulerGuard>) {
     {
+        // Release the scheduler lock; its drop restores this task's interrupt state.
         let mut scheduler = unsafe { ptr::read(scheduler) };
-        // Drop the scheduler RAII guard to release the lock.
         ManuallyDrop::drop(&mut scheduler);
     }
 
-    // Ensure we enable interrupts after dropping the lock on the scheduler.
-    // The new task does not have an `iret` in the kernel exit path, so
-    // interrupts will remain disabled. The following is a special exception to ensure
-    // interrupts are enabled.
-    asm!("sti");
-
-    // Actual code that the task starts running
     entry();
 }
 
-pub(crate) fn current_task() -> TaskHandle {
+fn _current_task<'a>() -> &'a mut Task {
     // SAFETY: When a Task is created, its Task struct is placed at the bottom of the 8192-byte
     //         kernel stack, or the top of the 8192 contiguous bytes of memory allocated.
     //         Once created, it is never moved or deallocated until the Task ends. Therefore, it is
@@ -340,7 +333,25 @@ pub(crate) fn current_task() -> TaskHandle {
     unsafe {
         let rsp: usize;
         asm!("mov {}, rsp", out(reg) rsp);
-        let task = (rsp & TASK_STRUCT_MASK) as *const Task;
-        (*task).get_handle()
+        let task = (rsp & TASK_STRUCT_MASK) as *mut Task;
+        &mut *task
     }
+}
+
+/// Gets the TaskHandle for the currently running task.
+pub(crate) fn current_task() -> TaskHandle {
+    let task = _current_task();
+    task.get_handle()
+}
+
+/// Records the interrupt state the currently running task should resume with.
+pub(super) fn set_resume_interrupts(enabled: bool) {
+    let task = _current_task();
+    (*task).info.interrupt_enabled = enabled;
+}
+
+/// Reads the interrupt state the currently running task should resume with.
+pub(super) fn resume_interrupts() -> bool {
+    let task = _current_task();
+    task.info.interrupt_enabled
 }

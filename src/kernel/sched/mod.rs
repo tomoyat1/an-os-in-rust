@@ -1,12 +1,13 @@
 use crate::arch::x86_64::hpet;
+use crate::arch::x86_64::interrupt::{disable_interrupts, enable_interrupts, interrupts_enabled};
 use crate::kernel::clock;
 use crate::kernel::sched::task::TaskList;
-use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
 
 use alloc::boxed::Box;
 
 use core::ffi::c_void;
 use core::mem::ManuallyDrop;
+use core::ops::{Deref, DerefMut};
 use core::ptr;
 
 mod task;
@@ -28,11 +29,44 @@ pub struct Scheduler {
     task_list: TaskList,
 }
 
-static SCHEDULER: WithSpinLock<Scheduler> = WithSpinLock::new(Scheduler {
+static SCHEDULER: spin::Mutex<Scheduler> = spin::Mutex::new(Scheduler {
     task_list: TaskList::new(),
 });
 
-impl<'a> WithSpinLockGuard<'a, Scheduler> {
+/// Guard for the scheduler lock with the ability to restore the interrupt flag based on the
+/// state that is stored in the Task.
+pub(crate) struct SchedulerGuard<'a> {
+    inner: spin::MutexGuard<'a, Scheduler>,
+}
+
+impl Deref for SchedulerGuard<'_> {
+    type Target = Scheduler;
+
+    fn deref(&self) -> &Scheduler {
+        &self.inner
+    }
+}
+
+impl DerefMut for SchedulerGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Scheduler {
+        &mut self.inner
+    }
+}
+
+impl Drop for SchedulerGuard<'_> {
+    fn drop(&mut self) {
+        let was_enabled = task::resume_interrupts();
+        unsafe {
+            // Release the lock before restoring interrupts.
+            ptr::drop_in_place(&mut self.inner);
+            if was_enabled {
+                enable_interrupts()
+            }
+        }
+    }
+}
+
+impl<'a> SchedulerGuard<'a> {
     pub(crate) fn switch(mut self) {
         // Hardcode use of HPET for now.
         // TODO: abstract clocksources and get time from the trait object.
@@ -55,11 +89,11 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
 
         let mut scheduler = ManuallyDrop::new(self);
         unsafe {
-            let mut scheduler =
-                ptr::read(
-                    _do_switch(switch_from, switch_to, &raw mut scheduler as *mut c_void)
-                        as *mut ManuallyDrop<WithSpinLockGuard<Scheduler>>,
-                );
+            let mut scheduler = ptr::read(_do_switch(
+                switch_from,
+                switch_to,
+                &raw mut scheduler as *mut c_void,
+            ) as *mut ManuallyDrop<SchedulerGuard>);
             ManuallyDrop::drop(&mut scheduler);
         };
     }
@@ -76,11 +110,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
                 .expect("null pointer in UnsafeCell")
         };
         if let Some(clock) = clock {
-            let (start, until) = {
-                let start = clock.get_tick();
-                let until = start + ns;
-                (start, until)
-            };
+            let until = clock.get_tick() + ns;
             let current_task = {
                 let task = current_task();
                 self.task_list.set_runnable(task, false);
@@ -88,7 +118,7 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
             };
             clock.callback_at(
                 until,
-                Box::new(move |x| {
+                Box::new(move |_| {
                     SCHEDULER.lock().task_list.set_runnable(current_task, true);
                 }),
             );
@@ -112,21 +142,26 @@ impl<'a> WithSpinLockGuard<'a, Scheduler> {
 }
 
 pub(crate) fn init() {
-    let mut handle = SCHEDULER.lock();
+    let mut handle = lock();
     handle.task_list.init_idle_task();
 
     // Switch into the idle task.
     handle.switch()
 }
 
-pub(crate) fn lock() -> WithSpinLockGuard<'static, Scheduler> {
-    SCHEDULER.lock()
+pub(crate) fn lock() -> SchedulerGuard<'static> {
+    let was_enabled = interrupts_enabled();
+    disable_interrupts();
+    task::set_resume_interrupts(was_enabled);
+    SchedulerGuard {
+        inner: SCHEDULER.lock(),
+    }
 }
 
 #[unsafe(no_mangle)]
 extern "C" fn check_runtime() {
     let now = hpet::get_time();
-    let scheduler = SCHEDULER.lock();
+    let scheduler = lock();
     if scheduler.task_list.get_run_until(current_task()) <= now {
         scheduler.switch()
     }

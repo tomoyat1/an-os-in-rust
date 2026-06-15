@@ -118,7 +118,7 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
 }
 
 /// This is a placeholder for actual code that a newly created task would run.
-fn some_task() {
+pub fn some_task() {
     loop {
         let current = sched::current_task();
         writeln!(serial::Handle::new(), "Yo! from some task: {:}", current);
