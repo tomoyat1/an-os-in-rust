@@ -263,23 +263,28 @@ impl RTL8139 {
     }
 
     fn handle_receive(&self) {
-        // Current Buffer Address
+        // Current Buffer Address: where the NIC has written data up to
         let cbr = unsafe { self.inw(REG_CBR) } as usize;
 
-        // Current Address of Packet Read
+        // Current Address of Packet Read: where we have read data up to
         // This register is offset by -0x10, so adjust.
         let capr = unsafe { self.inw(REG_CAPR) } as usize + 0x10;
         let mut capr = capr % RX_BUF_SIZE;
 
-        // The whole unread portion of the rx buffer. May contain multiple frames.
-        let mut rx = if cbr < capr {
-            &self.rx_buf.lock().buf[capr..RX_BUF_SIZE + cbr]
-        } else {
-            &self.rx_buf.lock().buf[capr..cbr]
-        };
         loop {
-            // Receive status register.
-            let (rsr, remaining) = rx.split_at(2);
+            let cr = unsafe { self.inb(REG_COMMAND) };
+            if cr & 0x1 == 0x1 {
+                break;
+            };
+
+            // When we have read all the frames received when the thread was woken, cbr would be
+            // equal to capr. If so, exit the loop.
+            if cbr == capr {
+                break;
+            }
+
+            let mut rx_buf = &self.rx_buf.lock().buf[capr..];
+            let (rsr, remaining) = rx_buf.split_at(2);
             let rsr = {
                 // Panics on failure to get 2 bytes off of the rx buffer.
                 // This should not happen.
@@ -288,16 +293,16 @@ impl RTL8139 {
                 u16::from_le_bytes(rsr)
             };
 
-            // Frame size.
             let (frame_size, remaining) = remaining.split_at(2);
-
-            // `frame_size` is the size of just the following received frame.
             let frame_size = {
                 let fs = frame_size.try_into();
                 let fs = fs.unwrap();
                 u16::from_le_bytes(fs)
             };
-            let (frame, remaining) = remaining.split_at(frame_size as usize);
+
+            // ..frame_size may read past the 8k buffer
+            let frame = &remaining[..frame_size as usize];
+
             // Process frame
             writeln!(
                 Handle::new(),
@@ -307,9 +312,6 @@ impl RTL8139 {
                 capr,
                 cbr,
             );
-
-            capr = ((capr + 4 + frame_size as usize + 3) & !3) % RX_BUF_SIZE;
-            rx = remaining;
 
             // write this common ethernet code in the driver for testing
             match ethernet::Frame::from_bytes(frame) {
@@ -327,15 +329,18 @@ impl RTL8139 {
                 }
             }
 
-            let cr = unsafe { self.inb(REG_COMMAND) };
-            if cr & 0x1 != 0x1 {
-                break;
-            };
-        }
+            capr = {
+                let capr = capr + 4 + frame_size as usize;
 
-        // The CAPR register is bugged (at least in QEMU, and presumably in real HW)
-        // so it reads/writes numbers that are off by -0x10.
-        unsafe { self.outw(REG_CAPR, capr as u16 - 0x10) }
+                // Align to nearest 4-byte boundary.
+                let capr = (capr + 3) & !3;
+                capr % RX_BUF_SIZE
+            };
+
+            // The CAPR register is bugged (at least in QEMU, and presumably in real HW)
+            // so it reads/writes numbers that are off by -0x10.
+            unsafe { self.outw(REG_CAPR, (capr as u16).wrapping_sub(0x10)) };
+        }
     }
 }
 
