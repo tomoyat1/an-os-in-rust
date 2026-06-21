@@ -14,6 +14,7 @@ use crate::kernel::sched;
 use crate::locking::semaphore::Semaphore;
 use crate::locking::spinlock::WithSpinLock;
 use crate::net::ethernet;
+use crate::net::ethernet::MACAddress;
 use crate::serial::Handle;
 
 // For debugging
@@ -242,6 +243,16 @@ impl RTL8139 {
         port::outl(self.ioaddr(offset), data)
     }
 
+    fn id(&self) -> MACAddress {
+        let mut mac = [0u8; 6];
+        unsafe {
+            for i in 0..6 {
+                mac[i] = self.inb(i as u16);
+            }
+        }
+        mac.into()
+    }
+
     fn handle_interrupt(&self) {
         self.pending_irqs.wait();
 
@@ -314,7 +325,7 @@ impl RTL8139 {
                 cbr,
             );
 
-            match net::recv_frame(frame) {
+            match net::recv_frame(frame, self.id()) {
                 Ok(_) => {}
                 Err(e) => {
                     writeln!(Handle::new(), "{}\n", e);

@@ -16,6 +16,18 @@ mod raw {
 #[repr(C)]
 pub(crate) struct MACAddress([u8; 6]);
 
+impl From<[u8; 6]> for MACAddress {
+    fn from(bytes: [u8; 6]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl From<MACAddress> for [u8; 6] {
+    fn from(mac: MACAddress) -> Self {
+        mac.0
+    }
+}
+
 impl core::fmt::Display for MACAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(
@@ -28,14 +40,14 @@ impl core::fmt::Display for MACAddress {
 
 #[repr(C)]
 pub(crate) enum EtherType {
-    ARP(),
+    ARP,
     Other([u8; 2]),
 }
 
 impl Display for EtherType {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::ARP() => {
+            Self::ARP => {
                 write!(f, "ARP")
             }
             Self::Other(bytes) => {
@@ -106,7 +118,7 @@ impl<'a> Frame<'a> {
                     let mut et_bytes: [u8; 2] = [0; 2];
                     et_bytes.copy_from_slice(tpid_or_ethertype);
                     ethertype = match et_bytes {
-                        [0x8, 0x6] => EtherType::ARP(),
+                        [0x8, 0x6] => EtherType::ARP,
                         _ => EtherType::Other(et_bytes),
                     };
                     let (p, c) = remaining.split_at(remaining.len() - size_of::<raw::CRC>());
