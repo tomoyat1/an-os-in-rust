@@ -55,14 +55,14 @@ pub(crate) struct FrameHeader {
     pub(crate) ethertype: EtherType,
 }
 
-pub(crate) struct Frame {
+pub(crate) struct Frame<'a> {
     pub(crate) header: FrameHeader,
-    pub(crate) payload: Vec<u8>,
+    pub(crate) payload: &'a [u8],
     pub(crate) crc: [u8; 4],
 }
 
-impl Frame {
-    pub fn from_bytes(frame: &[u8]) -> Result<Frame, &str> {
+impl<'a> Frame<'a> {
+    pub fn from_bytes(frame: &'a [u8]) -> Result<Frame<'a>, &str> {
         if frame.len() < size_of::<raw::MACAddress>() {
             return Err("Not enough bytes for MAC source");
         };
@@ -88,8 +88,7 @@ impl Frame {
         let mut ethertype = EtherType::Other([0; 2]);
         let mut vlan_tag = Vec::<[u8; 4]>::new();
         let mut crc = [0u8; 4];
-        let mut payload: Vec<u8>;
-
+        let mut payload: &'_ [u8];
         loop {
             let (tpid_or_ethertype, r) = remaining.split_at(size_of::<raw::EtherType>());
             match *tpid_or_ethertype {
@@ -112,7 +111,8 @@ impl Frame {
                     };
                     let (p, c) = remaining.split_at(remaining.len() - size_of::<raw::CRC>());
                     crc.copy_from_slice(c);
-                    payload = Vec::from(p);
+                    payload = p;
+
                     break;
                 }
             }
