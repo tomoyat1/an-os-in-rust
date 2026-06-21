@@ -9,6 +9,8 @@ mod raw {
     pub type EtherType = [u8; 2];
 
     pub type VLANTag = [u8; 4];
+
+    pub type CRC = [u8; 4];
 }
 
 #[repr(C)]
@@ -55,8 +57,8 @@ pub(crate) struct FrameHeader {
 
 pub(crate) struct Frame {
     pub(crate) header: FrameHeader,
-    payload: Vec<u8>,
-    crc: [u8; 4],
+    pub(crate) payload: Vec<u8>,
+    pub(crate) crc: [u8; 4],
 }
 
 impl Frame {
@@ -85,6 +87,8 @@ impl Frame {
         let mut remaining = remaining;
         let mut ethertype = EtherType::Other([0; 2]);
         let mut vlan_tag = Vec::<[u8; 4]>::new();
+        let mut crc = [0u8; 4];
+        let mut payload: Vec<u8>;
 
         loop {
             let (tpid_or_ethertype, r) = remaining.split_at(size_of::<raw::EtherType>());
@@ -106,12 +110,13 @@ impl Frame {
                         [0x8, 0x6] => EtherType::ARP(),
                         _ => EtherType::Other(et_bytes),
                     };
+                    let (p, c) = remaining.split_at(remaining.len() - size_of::<raw::CRC>());
+                    crc.copy_from_slice(c);
+                    payload = Vec::from(p);
                     break;
                 }
             }
         }
-
-        let payload = Vec::from(remaining);
 
         Ok(Self {
             header: FrameHeader {
@@ -120,8 +125,8 @@ impl Frame {
                 vlan_tag,
                 ethertype,
             },
-            payload: Vec::<u8>::new(),
-            crc: [0; 4],
+            payload,
+            crc,
         })
     }
 }

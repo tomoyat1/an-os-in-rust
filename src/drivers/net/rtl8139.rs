@@ -18,6 +18,7 @@ use crate::serial::Handle;
 
 // For debugging
 use crate::drivers::serial;
+use crate::net;
 
 pub static NICS: WithSpinLock<Vec<Arc<RTL8139>>> = WithSpinLock::new(Vec::new());
 
@@ -313,19 +314,10 @@ impl RTL8139 {
                 cbr,
             );
 
-            // write this common ethernet code in the driver for testing
-            match ethernet::Frame::from_bytes(frame) {
-                Ok(frame) => {
-                    writeln!(
-                        Handle::new(),
-                        "src: {}, dest: {}, EtherType: {}\n",
-                        &frame.header.src_mac,
-                        &frame.header.dest_mac,
-                        &frame.header.ethertype,
-                    );
-                }
-                Err(s) => {
-                    writeln!(Handle::new(), "{}\n", s);
+            match net::recv_frame(frame) {
+                Ok(_) => {}
+                Err(e) => {
+                    writeln!(Handle::new(), "{}\n", e);
                 }
             }
 
