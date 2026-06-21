@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+net="vmnet"
+stdio="monitor"
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --net)
+      net="$2"
+      shift 2
+      ;;
+    --net=*)
+      net="${1#--net=}"
+      shift
+      ;;
+    --stdio)
+      stdio="$2"
+      shift 2
+      ;;
+    --stdio=*)
+      stdio="${1#--stdio=}"
+      shift
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      echo "usage: $0 [--net vmnet|socket] [--stdio monitor|serial]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+case "$net" in
+  vmnet)
+    sudo=(sudo)
+    net_args=(-nic vmnet-host,model=rtl8139)
+    ;;
+  socket)
+    sudo=()
+    net_args=(
+      -device rtl8139,netdev=net0
+      -netdev dgram,id=net0,local.type=inet,local.host=127.0.0.1,local.port=5556,remote.type=inet,remote.host=127.0.0.1,remote.port=5555
+    )
+    ;;
+  *)
+    echo "unknown --net backend: $net (expected vmnet or socket)" >&2
+    exit 1
+    ;;
+esac
+
+case "$stdio" in
+  monitor)
+    stdio_args=(-monitor stdio)
+    ;;
+  serial)
+    stdio_args=(-serial stdio -monitor vc)
+    ;;
+  *)
+    echo "unknown --stdio target: $stdio (expected monitor or serial)" >&2
+    exit 1
+    ;;
+esac
+
+"${sudo[@]}" qemu-system-x86_64 \
+  -S \
+  -gdb tcp:localhost:1234 \
+  -machine q35 \
+  "${stdio_args[@]}" \
+  -drive if=pflash,format=raw,readonly=on,file=$REPO_ROOT/qemu/OVMF_CODE-with-csm.fd \
+  -drive if=pflash,format=raw,file=$REPO_ROOT/qemu/OVMF_VARS-with-csm.fd \
+  -hda fat:rw:$REPO_ROOT/qemu/hda \
+  -display cocoa,zoom-to-fit=on \
+  "${net_args[@]}" \
+  -d cpu_reset \
+  -m 4096

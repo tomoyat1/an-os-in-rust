@@ -17,8 +17,8 @@ bootloader:
 
 .PHONY: install
 install:
-	cp ./target/x86_64-unknown-aosir/debug/aosir ~/src/qemu/hda/aosir
-	cp ./target/x86_64-unknown-uefi/debug/bootx64.efi ~/src/qemu/hda/EFI/BOOT/bootx64.efi
+	cp ./target/x86_64-unknown-aosir/debug/aosir ./qemu/hda/aosir
+	cp ./target/x86_64-unknown-uefi/debug/bootx64.efi ./qemu/hda/EFI/BOOT/bootx64.efi
 
 .PHONY: test
 test:
