@@ -36,7 +36,7 @@ pub fn recv_frame(bytes: &[u8], mac: MACAddress) -> Result<(), Error> {
                     // Temporary buffer in the heap until we can get a buffer from the
                     // NIC driver.
                     let mut buf = Box::<[u8; 46]>::new([0; 46]);
-                    arp::send_reply(frame.payload, mac, buf.as_mut());
+                    arp::send_reply(frame.payload.as_slice(), mac, buf.as_mut());
                     writeln!(serial::Handle::new(), "Payload:");
                     for (i, byte) in buf.iter().enumerate() {
                         write!(serial::Handle::new(), "{:0>2x}", byte);
