@@ -78,6 +78,11 @@ impl<'a> Frame<'a> {
         };
         Ok(Self { bytes })
     }
+
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
     pub fn dest(&self) -> MACAddress {
         let mut bytes: raw::MACAddress = [0; 6];
         bytes.copy_from_slice(&self.bytes[0..6]);
@@ -248,10 +253,10 @@ impl<'a> Builder<'a, builder::EtherType> {
 }
 
 impl<'a> Builder<'a, builder::Payload> {
-    pub fn payload(mut self, payload: &[u8]) -> &'a mut [u8] {
+    pub fn payload(mut self, payload: &[u8]) -> Frame<'a> {
         let end = self.pos + payload.len();
         self.buf[self.pos..end].copy_from_slice(payload);
-        self.buf
+        Frame { bytes: self.buf }
     }
 }
 
