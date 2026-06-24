@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 use core::fmt::{Display, Formatter};
-use core::mem::size_of;
+use core::mem::MaybeUninit;
 use core::slice;
 
 mod raw {
@@ -8,13 +8,13 @@ mod raw {
 
     pub type EtherType = [u8; 2];
 
-    pub type VLANTag = [u8; 4];
+    pub type VLANTag = [u8; 2];
 
     pub type CRC = [u8; 4];
 }
 
-#[repr(C)]
-pub(crate) struct MACAddress([u8; 6]);
+#[repr(transparent)]
+pub(crate) struct MACAddress(raw::MACAddress);
 
 impl From<[u8; 6]> for MACAddress {
     fn from(bytes: [u8; 6]) -> Self {
@@ -28,7 +28,7 @@ impl From<MACAddress> for [u8; 6] {
     }
 }
 
-impl core::fmt::Display for MACAddress {
+impl Display for MACAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(
             f,
@@ -44,6 +44,15 @@ pub(crate) enum EtherType {
     Other([u8; 2]),
 }
 
+impl EtherType {
+    pub fn as_bytes(&self) -> [u8; 2] {
+        match self {
+            Self::ARP => [0x08, 0x06],
+            Self::Other(bytes) => *bytes,
+        }
+    }
+}
+
 impl Display for EtherType {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -57,88 +66,210 @@ impl Display for EtherType {
     }
 }
 
-pub(crate) struct FrameHeader {
-    pub(crate) src_mac: MACAddress,
-    pub(crate) dest_mac: MACAddress,
-
-    // IEEE 802.3Q tag (optional)
-    vlan_tag: Vec<raw::VLANTag>,
-
-    pub(crate) ethertype: EtherType,
+#[repr(transparent)]
+pub(crate) struct Frame<'a> {
+    bytes: &'a [u8],
 }
 
-pub(crate) struct Frame {
-    pub(crate) header: FrameHeader,
-    pub(crate) payload: Vec<u8>,
-    pub(crate) crc: [u8; 4],
-}
+impl<'a> Frame<'a> {
+    pub fn try_from_bytes(bytes: &'a [u8]) -> Result<Self, &'a str> {
+        if bytes.len() < 64 || bytes.len() > 1534 {
+            return Err("Ethernet frame length out of valid bounds");
+        };
+        Ok(Self { bytes })
+    }
+    pub fn dest(&self) -> MACAddress {
+        let mut bytes: raw::MACAddress = [0; 6];
+        bytes.copy_from_slice(&self.bytes[0..6]);
+        MACAddress::from(bytes)
+    }
 
-impl Frame {
-    pub fn from_bytes(frame: &[u8]) -> Result<Frame, &str> {
-        if frame.len() < size_of::<raw::MACAddress>() {
-            return Err("Not enough bytes for MAC source");
-        };
-        let (src_mac, remaining) = {
-            let (data, remaining) = frame.split_at(size_of::<raw::MACAddress>());
-            let mut src_mac: [u8; 6] = [0; 6];
-            src_mac.copy_from_slice(data);
-            (MACAddress(src_mac), remaining)
-        };
-        if frame.len() < size_of::<raw::MACAddress>() {
-            return Err("Not enough bytes for MAC destination");
-        };
-        let (dest_mac, remaining) = {
-            let (data, remaining) = remaining.split_at(size_of::<raw::MACAddress>());
-            let mut dest_mac: [u8; 6] = [0; 6];
-            dest_mac.copy_from_slice(data);
-            (MACAddress(dest_mac), remaining)
-        };
-        if frame.len() < size_of::<raw::EtherType>() {
-            return Err("Not enough bytes for EtherType");
-        }
-        let mut remaining = remaining;
-        let mut ethertype = EtherType::Other([0; 2]);
-        let mut vlan_tag = Vec::<[u8; 4]>::new();
-        let mut crc = [0u8; 4];
-        let mut payload: Vec<u8>;
+    pub fn src(&self) -> MACAddress {
+        let mut bytes: raw::MACAddress = [0; 6];
+        bytes.copy_from_slice(&self.bytes[6..12]);
+        MACAddress::from(bytes)
+    }
 
+    pub fn vlan_tags(&self) -> [Option<[u8; 2]>; 2] {
+        let mut tags = [None; 2];
+        let mut bytes = &self.bytes[12..];
+        let mut i = 0usize;
         loop {
-            let (tpid_or_ethertype, r) = remaining.split_at(size_of::<raw::EtherType>());
+            let (tpid_or_ethertype, b) = bytes.split_at(size_of::<raw::EtherType>());
+            bytes = b;
             match *tpid_or_ethertype {
-                [0x81, 0x00] | [0x8a, 0x88] => {
-                    // VLAN tag.
-                    let (data, r) = remaining.split_at(size_of::<[u8; 4]>());
-                    remaining = r;
-                    let mut tag: [u8; 4] = [0; 4];
-                    tag.copy_from_slice(data);
-                    vlan_tag.push(tag)
+                [0x81, 0x00] => {
+                    if i >= 2 {
+                        continue;
+                    }
+                    let (t, _) = b.split_at(size_of::<raw::VLANTag>());
+                    let mut tag = [0u8; 2];
+                    tag.copy_from_slice(t);
+                    tags[i] = Some(tag)
+                }
+                _ => break,
+            }
+        }
+
+        tags
+    }
+
+    pub fn ethertype(&self) -> EtherType {
+        let mut bytes = &self.bytes[12..];
+        loop {
+            let (tpid_or_ethertype, b) = bytes.split_at(size_of::<raw::EtherType>());
+            match *tpid_or_ethertype {
+                [0x81, 0x00] => {
+                    (_, bytes) = b.split_at(size_of::<raw::VLANTag>());
+                    continue;
                 }
                 _ => {
-                    remaining = r;
-                    assert_eq!(tpid_or_ethertype.len(), size_of::<raw::EtherType>());
-                    let mut et_bytes: [u8; 2] = [0; 2];
+                    let mut et_bytes = [0u8; 2];
                     et_bytes.copy_from_slice(tpid_or_ethertype);
-                    ethertype = match et_bytes {
+                    let ethertype = match *tpid_or_ethertype {
                         [0x8, 0x6] => EtherType::ARP,
                         _ => EtherType::Other(et_bytes),
                     };
-                    let (p, c) = remaining.split_at(remaining.len() - size_of::<raw::CRC>());
-                    crc.copy_from_slice(c);
-                    payload = Vec::from(p);
+                    return ethertype;
+                }
+            }
+        }
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        let payload_with_crc = self.payload_with_crc();
+        &payload_with_crc[0..payload_with_crc.len() - 4]
+    }
+
+    pub fn crc(&self) -> [u8; 4] {
+        let payload_with_crc = self.payload_with_crc();
+        let crc_bytes = &payload_with_crc[payload_with_crc.len() - 4..];
+        let mut crc = [0u8; 4];
+        crc.copy_from_slice(crc_bytes);
+        crc
+    }
+
+    fn payload_with_crc(&self) -> &[u8] {
+        let mut bytes = &self.bytes[12..];
+        loop {
+            let (tpid_or_ethertype, b) = bytes.split_at(size_of::<raw::EtherType>());
+            match *tpid_or_ethertype {
+                [0x81, 0x00] => {
+                    (_, bytes) = b.split_at(size_of::<raw::VLANTag>());
+                    continue;
+                }
+                _ => {
+                    bytes = b;
                     break;
                 }
             }
         }
-
-        Ok(Self {
-            header: FrameHeader {
-                src_mac,
-                dest_mac,
-                vlan_tag,
-                ethertype,
-            },
-            payload,
-            crc,
-        })
+        bytes
     }
+}
+
+pub(crate) struct Builder<'a, S: builder::Step> {
+    buf: &'a mut [u8],
+    pos: usize,
+    _phantom: core::marker::PhantomData<S>,
+}
+
+impl<'a> Builder<'a, builder::Dest> {
+    pub fn new(buf: &'a mut [u8]) -> Builder<'a, builder::Dest> {
+        Builder {
+            buf,
+            pos: 0,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    pub fn dest(mut self, dest: MACAddress) -> Builder<'a, builder::Src> {
+        self.buf[self.pos..self.pos + 6].copy_from_slice(&dest.0);
+        self.pos += 6;
+        Builder {
+            buf: self.buf,
+            pos: self.pos,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a> Builder<'a, builder::Src> {
+    pub fn src(mut self, src: MACAddress) -> Builder<'a, builder::VLANTag> {
+        self.buf[self.pos..self.pos + 6].copy_from_slice(&src.0);
+        self.pos += 6;
+        Builder {
+            buf: self.buf,
+            pos: self.pos,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a> Builder<'a, builder::VLANTag> {
+    pub fn vlan_tags(mut self, tags: [Option<raw::VLANTag>; 2]) -> Builder<'a, builder::EtherType> {
+        let bytes = tags
+            .into_iter()
+            .flatten()
+            .flat_map(|tag| [0x81, 0x00].into_iter().chain(tag));
+        for b in bytes {
+            self.buf[self.pos] = b;
+            self.pos += 1;
+        }
+
+        Builder {
+            buf: self.buf,
+            pos: self.pos,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+
+    pub fn ethertype(mut self, ethertype: EtherType) -> Builder<'a, builder::Payload> {
+        self.buf[self.pos..self.pos + 2].copy_from_slice(&ethertype.as_bytes());
+        self.pos += 2;
+        Builder {
+            buf: self.buf,
+            pos: self.pos,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a> Builder<'a, builder::EtherType> {
+    pub fn ethertype(mut self, ethertype: EtherType) -> Builder<'a, builder::Payload> {
+        self.buf[self.pos..self.pos + 2].copy_from_slice(&ethertype.as_bytes());
+        self.pos += 2;
+        Builder {
+            buf: self.buf,
+            pos: self.pos,
+            _phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a> Builder<'a, builder::Payload> {
+    pub fn payload(mut self, payload: &[u8]) -> &'a mut [u8] {
+        let end = self.pos + payload.len();
+        self.buf[self.pos..end].copy_from_slice(payload);
+        self.buf
+    }
+}
+
+pub(crate) mod builder {
+    pub trait Step {}
+
+    pub struct Dest;
+    impl Step for Dest {}
+
+    pub struct Src;
+    impl Step for Src {}
+
+    pub struct VLANTag;
+    impl Step for VLANTag {}
+
+    pub struct EtherType;
+    impl Step for EtherType {}
+
+    pub struct Payload;
+    impl Step for Payload {}
 }

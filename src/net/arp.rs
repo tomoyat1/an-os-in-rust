@@ -1,4 +1,4 @@
-use crate::net::ethernet::MACAddress;
+use crate::net::ethernet::{Builder, EtherType, MACAddress};
 
 use alloc::vec::Vec;
 
@@ -82,7 +82,7 @@ impl ARP {
             ..self
         }
     }
-    fn write_bytes(&self, buf: &mut [u8]) {
+    fn write_bytes(&self, buf: &mut [u8]) -> usize {
         let mut written = 0usize;
 
         let mut put = |src: &[u8]| {
@@ -99,15 +99,31 @@ impl ARP {
         put(&self.sender_protocol_address);
         put(&self.target_hardware_address);
         put(&self.target_protocol_address);
+
+        written
     }
 }
 
-pub fn send_reply(recv_bytes: &[u8], sha: MACAddress, send_bytes: &mut [u8]) {
+pub fn send_reply(recv_bytes: &[u8], sha: MACAddress, send_bytes: &mut [u8]) -> usize {
     let received = ARP::from_bytes(recv_bytes);
     match Opcode::from(received.opcode) {
         Opcode::Request => {}
-        _ => return,
+        _ => return 0,
     }
     let reply = received.reply(sha);
-    reply.write_bytes(send_bytes);
+
+    let mut arp_payload = [0u8; 28];
+    let arp_len = reply.write_bytes(&mut arp_payload);
+
+    let eth_dest =
+        MACAddress::from(<[u8; 6]>::try_from(reply.target_hardware_address.as_slice()).unwrap());
+    let eth_src =
+        MACAddress::from(<[u8; 6]>::try_from(reply.sender_hardware_address.as_slice()).unwrap());
+
+    Builder::new(send_bytes)
+        .dest(eth_dest)
+        .src(eth_src)
+        .ethertype(EtherType::ARP)
+        .payload(&arp_payload[..arp_len])
+        .len()
 }

@@ -29,16 +29,23 @@ impl Display for Error<'_> {
 impl core::error::Error for Error<'_> {}
 
 pub fn recv_frame(bytes: &[u8], mac: MACAddress) -> Result<(), Error> {
-    match ethernet::Frame::from_bytes(bytes) {
+    match ethernet::Frame::try_from_bytes(bytes) {
         Ok(frame) => {
-            match frame.header.ethertype {
+            match frame.ethertype() {
                 ethernet::EtherType::ARP => {
+                    writeln!(
+                        serial::Handle::new(),
+                        "src: {}, dest: {}, EtherType: {}",
+                        &frame.src(),
+                        &frame.dest(),
+                        &frame.ethertype(),
+                    );
                     // Temporary buffer in the heap until we can get a buffer from the
                     // NIC driver.
-                    let mut buf = Box::<[u8; 46]>::new([0; 46]);
-                    arp::send_reply(frame.payload.as_slice(), mac, buf.as_mut());
-                    writeln!(serial::Handle::new(), "Payload:");
-                    for (i, byte) in buf.iter().enumerate() {
+                    let mut buf = Box::<[u8; 64]>::new([0; 64]);
+                    let len = arp::send_reply(frame.payload(), mac, buf.as_mut());
+                    writeln!(serial::Handle::new(), "Frame:");
+                    for (i, byte) in buf[..len].iter().enumerate() {
                         write!(serial::Handle::new(), "{:0>2x}", byte);
                         if i % 16 == 15 {
                             write!(serial::Handle::new(), "\n");
