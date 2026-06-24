@@ -1,11 +1,3 @@
-use alloc::boxed::Box;
-use alloc::sync::Arc;
-use alloc::vec;
-use alloc::vec::Vec;
-use core::cell::RefCell;
-use core::fmt::Write;
-use core::hint::spin_loop;
-
 use crate::arch::x86_64::interrupt::{register_handler, IOAPIC, LOCAL_APIC};
 use crate::arch::x86_64::{mm, port};
 use crate::drivers::pci::{BarNumber, PCIDevice};
@@ -13,13 +5,21 @@ use crate::drivers::{acpi, pci};
 use crate::kernel::sched;
 use crate::locking::semaphore::Semaphore;
 use crate::locking::spinlock::WithSpinLock;
-use crate::net::ethernet;
-use crate::net::ethernet::MACAddress;
-use crate::serial::Handle;
+use crate::net;
+use crate::net::ethernet::raw::VLANTag;
+use crate::net::ethernet::{EtherType, Frame, FrameBuilder, MACAddress};
 
+use alloc::boxed::Box;
+use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cell::RefCell;
+use core::fmt::Write;
+use core::hint::spin_loop;
+use core::sync::atomic::AtomicU8;
+use core::sync::atomic::Ordering::{AcqRel, Acquire};
 // For debugging
 use crate::drivers::serial;
-use crate::net;
 
 pub static NICS: WithSpinLock<Vec<Arc<RTL8139>>> = WithSpinLock::new(Vec::new());
 
@@ -30,6 +30,12 @@ const RTL8139_VENDOR_ID: u16 = 0x10ec;
 const RTL8139_DEVICE_ID: u16 = 0x8139;
 
 // Registers
+// TSD0: 0x10-0x13
+const REG_TSD0: u16 = 0x10;
+
+// TSAD0: 0x20-0x23
+const REG_TSAD0: u16 = 0x20;
+
 // RBSTART (Receive Buffer Start Address): 0x30-0x33
 const REG_RBSTART: u16 = 0x30;
 
@@ -57,12 +63,17 @@ const REG_RCR: u16 = 0x44;
 // CONFIG1: 0x52
 const REG_CONFIG_1: u16 = 0x52;
 
+// TSAD: 0x60-0x61
+const REG_TSAD: u16 = 0x60;
+
 const RX_BUF_SIZE: usize = 8192;
 
 // Size of Rx buffer(s).
 // The size is 8192 + 16 + 1500 bytes to a) write a `0` to the Rx Buffer Length field in the RCR and b) to allow for
 // WRAP mode operation.
 const RX_BUF_SIZE_WITH_WRAP: usize = RX_BUF_SIZE + 16 + 1500;
+
+const TX_BUF_SIZE: usize = 1530;
 
 /// Initializes all RTL8139s on the PCI bus.
 pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
@@ -113,6 +124,11 @@ struct RxBuf {
     buf: [u8; RX_BUF_SIZE_WITH_WRAP],
 }
 
+#[repr(C, align(4))]
+struct TxBuf {
+    buf: [u8; TX_BUF_SIZE],
+}
+
 pub struct RTL8139 {
     // This should ideally be made module private.
     pub(crate) pci: PCIDevice,
@@ -123,6 +139,12 @@ pub struct RTL8139 {
     // The RX buffer
     rx_buf: WithSpinLock<Box<RxBuf>>,
 
+    // The TX buffers
+    tx_bufs: [WithSpinLock<Box<TxBuf>>; 4],
+
+    // Next TX buffer to use
+    next_tx_desc: AtomicU8,
+
     // Semaphore for the pending irq count.
     pending_irqs: Semaphore,
 }
@@ -131,9 +153,25 @@ impl RTL8139 {
     fn init<'a>(mut pci: pci::PCIDevice) -> Result<Arc<RTL8139>, ()> {
         let mut rx_buf = Box::<RxBuf>::new_uninit();
 
-        // Safety: This is a buffer that will be written to later by the device, so we don't care about the data
-        //         in it.
+        // SAFETY: This is a buffer that will be written to later by the device, so we don't care
+        //         about the data in it.
         let mut rx_buf = unsafe { rx_buf.assume_init() };
+
+        let mut tx_buf_0 = Box::<TxBuf>::new_uninit();
+        let mut tx_buf_1 = Box::<TxBuf>::new_uninit();
+        let mut tx_buf_2 = Box::<TxBuf>::new_uninit();
+        let mut tx_buf_3 = Box::<TxBuf>::new_uninit();
+
+        // SAFETY: These are buffers that will be written to later by packet senders, so we don't
+        //         care about the data in them.
+        let (tx_buf_0, tx_buf_1, tx_buf_2, tx_buf_3) = unsafe {
+            (
+                tx_buf_0.assume_init(),
+                tx_buf_1.assume_init(),
+                tx_buf_2.assume_init(),
+                tx_buf_3.assume_init(),
+            )
+        };
 
         // Everything "works" even though rtl8139 is not mutable because we don't
         // properly do any mutual exclusion for `out` and `in` calls.
@@ -144,6 +182,13 @@ impl RTL8139 {
         let rtl8139 = RTL8139 {
             pci,
             rx_buf: WithSpinLock::new(rx_buf),
+            tx_bufs: [
+                WithSpinLock::new(tx_buf_0),
+                WithSpinLock::new(tx_buf_1),
+                WithSpinLock::new(tx_buf_2),
+                WithSpinLock::new(tx_buf_3),
+            ],
+            next_tx_desc: AtomicU8::new(0),
             vector: 0x26, // We magically know that this vector is empty, for now.
             pending_irqs: Semaphore::new(128),
         };
@@ -165,12 +210,24 @@ impl RTL8139 {
             }
         };
 
-        // Init recv buffer
+        // Init rx buffer
         let rx_buf_virt_addr = rtl8139.rx_buf.lock().buf.as_ptr() as usize;
         let rx_buf_addr = mm::phys_addr(rx_buf_virt_addr);
         match rx_buf_addr {
             Some(rx_buf_addr) => unsafe { rtl8139.outl(REG_RBSTART, rx_buf_addr as u32) },
             None => panic!("rtl8139: unmapped rx_buf: {:x}", rx_buf_virt_addr),
+        }
+
+        // Init tx buffers
+        for i in 0..4 {
+            let tx_buf_virt_addr = rtl8139.tx_bufs[i].lock().buf.as_ptr() as usize;
+            let tx_buf_addr = mm::phys_addr(tx_buf_virt_addr);
+            match tx_buf_addr {
+                Some(tx_buf_addr) => unsafe {
+                    rtl8139.outl(REG_TSAD0 + (i * 4) as u16, tx_buf_addr as u32)
+                },
+                None => panic!("rtl8139: unmapped tx_buf: {:x}", tx_buf_virt_addr),
+            }
         }
 
         // Receive configuration
@@ -182,7 +239,7 @@ impl RTL8139 {
         // In other words, any valid packet.
         let accept_config: u32 = 0b1111;
 
-        // Configure WRAP behaviour so that packets overflowing the rx ring buffer would be written
+        // Configure WRAP behavior so that packets overflowing the rx ring buffer would be written
         // to the end in space following the buffer.
         let wrap: u32 = 0b1 << 7;
         unsafe {
@@ -243,6 +300,32 @@ impl RTL8139 {
         port::outl(self.ioaddr(offset), data)
     }
 
+    pub fn transmit(
+        &self,
+        dest: MACAddress,
+        vlan_tags: [Option<VLANTag>; 2],
+        ethertype: EtherType,
+        payload: &[u8],
+    ) {
+        let src = self.id();
+        let tx_i = self.next_tx_desc.update(AcqRel, Acquire, |n| (n + 1) % 4) as usize;
+        let mut tx_buf = self.tx_bufs[tx_i].lock();
+        let frame = FrameBuilder::new(tx_buf.buf.as_mut())
+            .dest(dest.into())
+            .src(src.into())
+            .vlan_tags(vlan_tags)
+            .ethertype(ethertype)
+            .payload(payload);
+
+        unsafe {
+            let Some(phys_addr) = mm::phys_addr(frame.as_bytes().as_ptr() as usize) else {
+                panic!("Tx buffer must be mapped");
+            };
+            self.outl(REG_TSAD0 + (tx_i * 4) as u16, phys_addr as u32);
+            self.outl(REG_TSD0 + (tx_i * 4) as u16, frame.len() as u32 & 0x1fff)
+        };
+    }
+
     fn id(&self) -> MACAddress {
         let mut mac = [0u8; 6];
         unsafe {
@@ -253,28 +336,16 @@ impl RTL8139 {
         mac.into()
     }
 
-    fn handle_interrupt(&self) {
-        self.pending_irqs.wait();
+    fn process(&self) {
+        self.pending_irqs.wait(); // TODO: This is fishy, a write complete bottom half blocks here
 
         // SAFETY: Not confirmed to be safe yet.
         let status = unsafe { self.inw(REG_ISR) };
 
-        writeln!(Handle::new(), "ISR: 0x{:x}\n", status);
-
-        // Reset status register so that another frame can be sent / received.
-        // SAFETY: Not confirmed to be safe yet. The same for all following port IO calls.
-        unsafe { self.outw(REG_ISR, 0x05) }
-
-        if status & 0x1 == 0x1 {
-            self.handle_receive()
-        }
-
-        if status & 0x4 == 0x4 {
-            // not supported yet
-        }
+        self.process_receive();
     }
 
-    fn handle_receive(&self) {
+    fn process_receive(&self) {
         // Current Buffer Address: where the NIC has written data up to
         let cbr = unsafe { self.inw(REG_CBR) } as usize;
 
@@ -304,7 +375,6 @@ impl RTL8139 {
                 let rsr = rsr.unwrap();
                 u16::from_le_bytes(rsr)
             };
-
             let (frame_size, remaining) = remaining.split_at(2);
             let frame_size = {
                 let fs = frame_size.try_into();
@@ -313,11 +383,13 @@ impl RTL8139 {
             };
 
             // ..frame_size may read past the 8k buffer
+            // TODO: copy this to a buffer that is owned by the network stack, instead of
+            //       keeping it in the NIC buffer.
             let frame = &remaining[..frame_size as usize];
 
             // Process frame
             writeln!(
-                Handle::new(),
+                serial::Handle::new(),
                 "RSR: {:x}, SIZE: {:x}, CAPR: {:x}, CBR: {:x}",
                 rsr,
                 frame_size,
@@ -328,7 +400,7 @@ impl RTL8139 {
             match net::recv_frame(frame, self.id()) {
                 Ok(_) => {}
                 Err(e) => {
-                    writeln!(Handle::new(), "{}\n", e);
+                    writeln!(serial::Handle::new(), "{}\n", e);
                 }
             }
 
@@ -367,8 +439,15 @@ pub extern "C" fn rtl8139_handler(vector: u64) {
     };
     for n in nics.iter() {
         let status = unsafe { n.inw(REG_ISR) };
-        if status != 0 {
+        writeln!(serial::Handle::new(), "ISR: 0x{:x}\n", status);
+        // Reset status register so that another frame can be sent / received.
+        // SAFETY: Not confirmed to be safe yet. The same for all following port IO calls.
+        unsafe { n.outw(REG_ISR, 0x05) }
+        if status & 1 == 1 {
             n.pending_irqs.try_release();
+        }
+        if status & 4 == 4 {
+            // Send complete
         }
     }
 
@@ -388,7 +467,7 @@ pub fn rtl8139_bottom_half() {
     }
     loop {
         for nic in nics.iter() {
-            nic.handle_interrupt();
+            nic.process();
         }
     }
 }

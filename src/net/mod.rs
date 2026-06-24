@@ -1,6 +1,8 @@
 use crate::net::ethernet::MACAddress;
 use crate::serial;
 
+use crate::drivers::net::rtl8139::{NICS, RTL8139};
+use crate::net::ethernet::EtherType::ARP;
 use alloc::boxed::Box;
 use core::fmt::Write;
 use core::fmt::{Debug, Display, Formatter};
@@ -57,6 +59,8 @@ pub fn recv_frame(bytes: &[u8], mac: MACAddress) -> Result<(), Error> {
                         }
                     }
                     writeln!(serial::Handle::new(), "");
+                    let rtl8139 = NICS.lock()[0].clone();
+                    rtl8139.transmit(frame.dest(), [None; 2], ARP, buf.as_slice());
                     Ok(())
                 }
                 _ => Ok(()),

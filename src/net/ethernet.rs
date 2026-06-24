@@ -3,7 +3,7 @@ use core::fmt::{Display, Formatter};
 use core::mem::MaybeUninit;
 use core::slice;
 
-mod raw {
+pub mod raw {
     pub type MACAddress = [u8; 6];
 
     pub type EtherType = [u8; 2];
@@ -81,6 +81,10 @@ impl<'a> Frame<'a> {
 
     pub fn len(&self) -> usize {
         self.bytes.len()
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.bytes
     }
 
     pub fn dest(&self) -> MACAddress {
@@ -173,25 +177,25 @@ impl<'a> Frame<'a> {
     }
 }
 
-pub(crate) struct Builder<'a, S: builder::Step> {
+pub(crate) struct FrameBuilder<'a, S: builder::Step> {
     buf: &'a mut [u8],
     pos: usize,
     _phantom: core::marker::PhantomData<S>,
 }
 
-impl<'a> Builder<'a, builder::Dest> {
-    pub fn new(buf: &'a mut [u8]) -> Builder<'a, builder::Dest> {
-        Builder {
+impl<'a> FrameBuilder<'a, builder::Dest> {
+    pub fn new(buf: &'a mut [u8]) -> FrameBuilder<'a, builder::Dest> {
+        FrameBuilder {
             buf,
             pos: 0,
             _phantom: core::marker::PhantomData,
         }
     }
 
-    pub fn dest(mut self, dest: MACAddress) -> Builder<'a, builder::Src> {
+    pub fn dest(mut self, dest: MACAddress) -> FrameBuilder<'a, builder::Src> {
         self.buf[self.pos..self.pos + 6].copy_from_slice(&dest.0);
         self.pos += 6;
-        Builder {
+        FrameBuilder {
             buf: self.buf,
             pos: self.pos,
             _phantom: core::marker::PhantomData,
@@ -199,11 +203,11 @@ impl<'a> Builder<'a, builder::Dest> {
     }
 }
 
-impl<'a> Builder<'a, builder::Src> {
-    pub fn src(mut self, src: MACAddress) -> Builder<'a, builder::VLANTag> {
+impl<'a> FrameBuilder<'a, builder::Src> {
+    pub fn src(mut self, src: MACAddress) -> FrameBuilder<'a, builder::VLANTag> {
         self.buf[self.pos..self.pos + 6].copy_from_slice(&src.0);
         self.pos += 6;
-        Builder {
+        FrameBuilder {
             buf: self.buf,
             pos: self.pos,
             _phantom: core::marker::PhantomData,
@@ -211,8 +215,11 @@ impl<'a> Builder<'a, builder::Src> {
     }
 }
 
-impl<'a> Builder<'a, builder::VLANTag> {
-    pub fn vlan_tags(mut self, tags: [Option<raw::VLANTag>; 2]) -> Builder<'a, builder::EtherType> {
+impl<'a> FrameBuilder<'a, builder::VLANTag> {
+    pub fn vlan_tags(
+        mut self,
+        tags: [Option<raw::VLANTag>; 2],
+    ) -> FrameBuilder<'a, builder::EtherType> {
         let bytes = tags
             .into_iter()
             .flatten()
@@ -222,17 +229,17 @@ impl<'a> Builder<'a, builder::VLANTag> {
             self.pos += 1;
         }
 
-        Builder {
+        FrameBuilder {
             buf: self.buf,
             pos: self.pos,
             _phantom: core::marker::PhantomData,
         }
     }
 
-    pub fn ethertype(mut self, ethertype: EtherType) -> Builder<'a, builder::Payload> {
+    pub fn ethertype(mut self, ethertype: EtherType) -> FrameBuilder<'a, builder::Payload> {
         self.buf[self.pos..self.pos + 2].copy_from_slice(&ethertype.as_bytes());
         self.pos += 2;
-        Builder {
+        FrameBuilder {
             buf: self.buf,
             pos: self.pos,
             _phantom: core::marker::PhantomData,
@@ -240,11 +247,11 @@ impl<'a> Builder<'a, builder::VLANTag> {
     }
 }
 
-impl<'a> Builder<'a, builder::EtherType> {
-    pub fn ethertype(mut self, ethertype: EtherType) -> Builder<'a, builder::Payload> {
+impl<'a> FrameBuilder<'a, builder::EtherType> {
+    pub fn ethertype(mut self, ethertype: EtherType) -> FrameBuilder<'a, builder::Payload> {
         self.buf[self.pos..self.pos + 2].copy_from_slice(&ethertype.as_bytes());
         self.pos += 2;
-        Builder {
+        FrameBuilder {
             buf: self.buf,
             pos: self.pos,
             _phantom: core::marker::PhantomData,
@@ -252,11 +259,13 @@ impl<'a> Builder<'a, builder::EtherType> {
     }
 }
 
-impl<'a> Builder<'a, builder::Payload> {
+impl<'a> FrameBuilder<'a, builder::Payload> {
     pub fn payload(mut self, payload: &[u8]) -> Frame<'a> {
         let end = self.pos + payload.len();
         self.buf[self.pos..end].copy_from_slice(payload);
-        Frame { bytes: self.buf }
+        Frame {
+            bytes: &self.buf[..end],
+        }
     }
 }
 
