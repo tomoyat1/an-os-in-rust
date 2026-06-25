@@ -260,9 +260,9 @@ impl<'a> FrameBuilder<'a, builder::EtherType> {
 }
 
 impl<'a> FrameBuilder<'a, builder::Payload> {
-    pub fn payload(mut self, payload: &[u8]) -> Frame<'a> {
-        let end = self.pos + payload.len();
-        self.buf[self.pos..end].copy_from_slice(payload);
+    pub fn payload(mut self, writer: impl FnOnce(&mut [u8]) -> usize) -> Frame<'a> {
+        let len = writer(&mut self.buf[self.pos..]);
+        let end = self.pos + len;
         Frame {
             bytes: &self.buf[..end],
         }

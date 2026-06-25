@@ -1,14 +1,13 @@
-use crate::net::ethernet::MACAddress;
+use crate::drivers::net::rtl8139::{NICS, RTL8139};
 use crate::serial;
 
-use crate::drivers::net::rtl8139::{NICS, RTL8139};
-use crate::net::ethernet::EtherType::ARP;
 use alloc::boxed::Box;
 use core::fmt::Write;
 use core::fmt::{Debug, Display, Formatter};
 
 pub mod arp;
 pub mod ethernet;
+use ethernet::{EtherType, MACAddress};
 
 #[derive(Debug)]
 enum ErrorType {
@@ -32,66 +31,22 @@ impl core::error::Error for Error<'_> {}
 
 pub fn recv_frame(bytes: &[u8], mac: MACAddress) -> Result<(), Error> {
     match ethernet::Frame::try_from_bytes(bytes) {
-        Ok(frame) => {
-            match frame.ethertype() {
-                ethernet::EtherType::ARP => {
-                    writeln!(
-                        serial::Handle::new(),
-                        "src: {}, dest: {}, EtherType: {}",
-                        &frame.src(),
-                        &frame.dest(),
-                        &frame.ethertype(),
-                    );
-                    // Temporary buffer in the heap until we can get a buffer from the
-                    // NIC driver.
-                    let mut buf = Box::<[u8; 64]>::new([0; 64]);
-                    let len = arp::send_reply(frame.payload(), mac, buf.as_mut());
-                    writeln!(serial::Handle::new(), "Frame:");
-                    for (i, byte) in buf[..len].iter().enumerate() {
-                        write!(serial::Handle::new(), "{:0>2x}", byte);
-                        if i % 16 == 15 {
-                            write!(serial::Handle::new(), "\n");
-                            continue;
-                        }
-                        if i % 2 == 1 {
-                            write!(serial::Handle::new(), " ");
-                            continue;
-                        }
-                    }
-                    writeln!(serial::Handle::new(), "");
-                    let rtl8139 = NICS.lock()[0].clone();
-                    rtl8139.transmit(frame.dest(), [None; 2], ARP, buf.as_slice());
-                    Ok(())
-                }
-                _ => Ok(()),
+        Ok(frame) => match frame.ethertype() {
+            EtherType::ARP => {
+                writeln!(
+                    serial::Handle::new(),
+                    "src: {}, dest: {}, EtherType: {}",
+                    &frame.src(),
+                    &frame.dest(),
+                    &frame.ethertype(),
+                );
+                let arp_writer = arp::reply_writer(frame.payload(), mac);
+                let rtl8139 = NICS.lock()[0].clone();
+                rtl8139.transmit(frame.dest(), [None; 2], EtherType::ARP, arp_writer);
+                Ok(())
             }
-            // writeln!(
-            //     serial::Handle::new(),
-            //     "src: {}, dest: {}, EtherType: {}",
-            //     &frame.header.src_mac,
-            //     &frame.header.dest_mac,
-            //     &frame.header.ethertype,
-            // );
-            // writeln!(serial::Handle::new(), "Payload:");
-            // for (i, byte) in frame.payload.iter().enumerate() {
-            //     write!(serial::Handle::new(), "{:0>2x}", byte);
-            //     if i % 16 == 15 {
-            //         write!(serial::Handle::new(), "\n");
-            //         continue;
-            //     }
-            //     if i % 2 == 1 {
-            //         write!(serial::Handle::new(), " ");
-            //         continue;
-            //     }
-            // }
-            // writeln!(serial::Handle::new(), "");
-            // write!(serial::Handle::new(), "CRC: ");
-            // for byte in frame.crc {
-            //     write!(serial::Handle::new(), "{:0>2x}", byte);
-            // }
-            // writeln!(serial::Handle::new(), "\n");
-            // Ok(())
-        }
+            _ => Ok(()),
+        },
         Err(s) => Err(Error {
             error_type: ErrorType::InvalidFrame,
             message: s,
