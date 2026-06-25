@@ -29,7 +29,12 @@ impl Display for Error<'_> {
 
 impl core::error::Error for Error<'_> {}
 
-pub fn recv_frame(bytes: &[u8], mac: MACAddress) -> Result<(), Error> {
+// TODO: Generalize RTL8139 with an Interface struct
+pub fn recv_frame<'a>(
+    bytes: &'a [u8],
+    interface: &'a RTL8139,
+    mac: MACAddress,
+) -> Result<(), Error<'a>> {
     match ethernet::Frame::try_from_bytes(bytes) {
         Ok(frame) => match frame.ethertype() {
             EtherType::ARP => {
@@ -41,8 +46,7 @@ pub fn recv_frame(bytes: &[u8], mac: MACAddress) -> Result<(), Error> {
                     &frame.ethertype(),
                 );
                 let arp_writer = arp::reply_writer(frame.payload(), mac);
-                let rtl8139 = NICS.lock()[0].clone();
-                rtl8139.transmit(frame.dest(), [None; 2], EtherType::ARP, arp_writer);
+                interface.transmit(frame.dest(), [None; 2], EtherType::ARP, arp_writer);
                 Ok(())
             }
             _ => Ok(()),

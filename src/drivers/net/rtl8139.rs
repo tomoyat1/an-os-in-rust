@@ -390,7 +390,7 @@ impl RTL8139 {
                 cbr,
             );
 
-            match net::recv_frame(frame, self.id()) {
+            match net::recv_frame(frame, self, self.id()) {
                 Ok(_) => {}
                 Err(e) => {
                     writeln!(serial::Handle::new(), "{}\n", e);
