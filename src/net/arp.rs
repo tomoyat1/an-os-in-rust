@@ -104,13 +104,15 @@ impl ARP {
     }
 }
 
-pub fn send_reply(recv_bytes: &[u8], sha: MACAddress, send_bytes: &mut [u8]) -> usize {
+pub fn reply_writer(recv_bytes: &[u8], sha: MACAddress) -> impl FnOnce(&mut [u8]) -> usize {
     let received = ARP::from_bytes(recv_bytes);
-    match Opcode::from(received.opcode) {
-        Opcode::Request => {}
-        _ => return 0,
-    }
-    let reply = received.reply(sha);
+    let reply = match Opcode::from(received.opcode) {
+        Opcode::Request => Some(received.reply(sha)),
+        _ => None,
+    };
 
-    reply.write_bytes(send_bytes)
+    move |buf| match &reply {
+        Some(reply) => reply.write_bytes(buf),
+        None => 0,
+    }
 }

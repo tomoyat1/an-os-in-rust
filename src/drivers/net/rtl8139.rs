@@ -305,7 +305,7 @@ impl RTL8139 {
         dest: MACAddress,
         vlan_tags: [Option<VLANTag>; 2],
         ethertype: EtherType,
-        payload: &[u8],
+        writer: impl FnOnce(&mut [u8]) -> usize,
     ) {
         let src = self.id();
         let tx_i = self.next_tx_desc.update(AcqRel, Acquire, |n| (n + 1) % 4) as usize;
@@ -315,7 +315,7 @@ impl RTL8139 {
             .src(src.into())
             .vlan_tags(vlan_tags)
             .ethertype(ethertype)
-            .payload(payload);
+            .payload(writer);
 
         unsafe {
             let Some(phys_addr) = mm::phys_addr(frame.as_bytes().as_ptr() as usize) else {
@@ -336,16 +336,9 @@ impl RTL8139 {
         mac.into()
     }
 
-    fn process(&self) {
-        self.pending_irqs.wait(); // TODO: This is fishy, a write complete bottom half blocks here
-
-        // SAFETY: Not confirmed to be safe yet.
-        let status = unsafe { self.inw(REG_ISR) };
-
-        self.process_receive();
-    }
-
     fn process_receive(&self) {
+        self.pending_irqs.wait();
+
         // Current Buffer Address: where the NIC has written data up to
         let cbr = unsafe { self.inw(REG_CBR) } as usize;
 
@@ -440,6 +433,7 @@ pub extern "C" fn rtl8139_handler(vector: u64) {
     for n in nics.iter() {
         let status = unsafe { n.inw(REG_ISR) };
         writeln!(serial::Handle::new(), "ISR: 0x{:x}\n", status);
+
         // Reset status register so that another frame can be sent / received.
         // SAFETY: Not confirmed to be safe yet. The same for all following port IO calls.
         unsafe { n.outw(REG_ISR, 0x05) }
@@ -467,7 +461,7 @@ pub fn rtl8139_bottom_half() {
     }
     loop {
         for nic in nics.iter() {
-            nic.process();
+            nic.process_receive();
         }
     }
 }
