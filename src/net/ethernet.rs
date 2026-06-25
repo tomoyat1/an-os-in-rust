@@ -71,8 +71,8 @@ pub(crate) struct Frame<'a> {
     bytes: &'a [u8],
 }
 
-impl<'a> Frame<'a> {
-    pub fn try_from_bytes(bytes: &'a [u8]) -> Result<Self, &'a str> {
+impl<'a, 'b> Frame<'a> {
+    pub fn try_from_bytes(bytes: &'a [u8]) -> Result<Self, &'b str> {
         if bytes.len() < 64 || bytes.len() > 1534 {
             return Err("Ethernet frame length out of valid bounds");
         };

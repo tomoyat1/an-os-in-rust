@@ -2,6 +2,7 @@ use crate::drivers::net::rtl8139::{NICS, RTL8139};
 use crate::serial;
 
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::fmt::Write;
 use core::fmt::{Debug, Display, Formatter};
 
@@ -30,12 +31,14 @@ impl Display for Error<'_> {
 impl core::error::Error for Error<'_> {}
 
 // TODO: Generalize RTL8139 with an Interface struct
-pub fn recv_frame<'a>(
+pub fn recv_frame<'a, 'b>(
     bytes: &'a [u8],
     interface: &'a RTL8139,
     mac: MACAddress,
-) -> Result<(), Error<'a>> {
-    match ethernet::Frame::try_from_bytes(bytes) {
+) -> Result<(), Error<'b>> {
+    let mut buf = Vec::<u8>::new();
+    buf.extend_from_slice(bytes);
+    match ethernet::Frame::try_from_bytes(&buf) {
         Ok(frame) => match frame.ethertype() {
             EtherType::ARP => {
                 writeln!(
