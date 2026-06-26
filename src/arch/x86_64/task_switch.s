@@ -17,10 +17,10 @@ _do_switch:
     popq %r14
     popq %r13
     popq %r12
-    popq %rbx // -24..-16
+    popq %rbx # -24..-16
     popq %rbp
 
-    // Copy third parameter fo _do_switch() to return value
+    # Copy third parameter fo _do_switch() to return value
     mov %rdx, %rax
 
     retq
