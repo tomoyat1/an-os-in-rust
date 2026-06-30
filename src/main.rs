@@ -83,6 +83,12 @@ pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
         serial::tmp_write_com1(b"[OK]\tNo NICs found\n")
     }
 
+    // Initialize network stack
+    {
+        let mut scheduler = sched::lock();
+        scheduler.new_task(net::run);
+    }
+
     // Create several tasks to demonstrate switching.
     {
         let mut scheduler = sched::lock();

@@ -1,8 +1,9 @@
-use alloc::vec::{self, Vec};
-use core::num::Wrapping;
-
 use crate::arch::x86_64::port;
 use crate::locking::spinlock::{WithSpinLock, WithSpinLockGuard};
+
+use alloc::vec::{self, Vec};
+use core::cmp::Ordering;
+use core::num::Wrapping;
 
 const REG_CAP_PTR: u16 = 0x34;
 
@@ -79,9 +80,11 @@ impl PCI {
         let device_id = ((cfg_data & 0xffff0000) >> 16) as u16;
 
         let mut device = PCIDevice {
-            bus_number: n_bus as u16,
-            device_number: n_device as u16,
-            function_number: n_function as u8,
+            bdf: BDF {
+                bus_number: n_bus as u16,
+                device_number: n_device as u16,
+                function_number: n_function as u8,
+            },
             vendor_id,
             device_id,
 
@@ -176,12 +179,32 @@ impl PCI {
     }
 }
 
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
+pub struct BDF {
+    bus_number: u16,
+    device_number: u16,
+    function_number: u8,
+}
+
+impl BDF {
+    pub fn bus_number(&self) -> u16 {
+        self.bus_number
+    }
+
+    pub fn device_number(&self) -> u16 {
+        self.device_number
+    }
+
+    pub fn function_number(&self) -> u8 {
+        self.function_number
+    }
+}
+
 /// This represents a PCI device on a PCI bus.
 /// TODO: Consider field visibility.
 pub struct PCIDevice {
-    pub(crate) bus_number: u16,
-    pub(crate) device_number: u16,
-    pub(crate) function_number: u8,
+    pub bdf: BDF,
 
     device_id: u16,
     vendor_id: u16,
@@ -196,9 +219,9 @@ pub struct PCIDevice {
 
 impl PCIDevice {
     unsafe fn outl(&self, offset: u16, data: u32) {
-        let n_bus = self.bus_number as u32;
-        let n_device = self.device_number as u32;
-        let function: u32 = (self.function_number as u32 & 0b111) << 8;
+        let n_bus = self.bdf.bus_number as u32;
+        let n_device = self.bdf.device_number as u32;
+        let function: u32 = (self.bdf.function_number as u32 & 0b111) << 8;
         let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | offset as u32;
 
         // Set register to write to.
@@ -209,9 +232,9 @@ impl PCIDevice {
     }
 
     unsafe fn inl(&self, offset: u16) -> u32 {
-        let n_bus = self.bus_number as u32;
-        let n_device = self.device_number as u32;
-        let function: u32 = (self.function_number as u32 & 0b111) << 8;
+        let n_bus = self.bdf.bus_number as u32;
+        let n_device = self.bdf.device_number as u32;
+        let function: u32 = (self.bdf.function_number as u32 & 0b111) << 8;
         let cfg_addr: u32 =
             0x80000000 | n_bus << 16 | n_device << 11 | function | (offset & 0xFC) as u32;
 
@@ -269,7 +292,7 @@ pub struct Handle<'a> {
 
 impl<'a> Handle<'a> {
     pub fn new() -> Self {
-        let pci = unsafe { PCI.lock() };
+        let pci = PCI.lock();
         Self { pci }
     }
     pub fn get_device(&mut self, vendor_id: u16, device_id: u16) -> Vec<PCIDevice> {

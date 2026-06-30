@@ -127,9 +127,10 @@ impl TaskList {
     }
 
     pub fn new_task(&mut self, entry: fn()) -> TaskHandle {
+        let current_task = current_task();
         let current_task = self
             .tasks
-            .get(&current_task().0)
+            .get(&current_task.0)
             .expect("New task creation attempted before boot task initialization.");
         let kernel_stack = unsafe {
             let layout = Layout::new::<Task>();

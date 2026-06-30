@@ -8,8 +8,10 @@ use crate::locking::spinlock::WithSpinLock;
 use crate::net;
 use crate::net::ethernet::raw::VLANTag;
 use crate::net::ethernet::{EtherType, Frame, FrameBuilder, MACAddress};
+use crate::net::{Interface, NETWORK_STACK};
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -18,10 +20,12 @@ use core::fmt::Write;
 use core::hint::spin_loop;
 use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering::{AcqRel, Acquire};
+
 // For debugging
 use crate::drivers::serial;
 
-pub static NICS: WithSpinLock<Vec<Arc<RTL8139>>> = WithSpinLock::new(Vec::new());
+pub static NICS: WithSpinLock<BTreeMap<pci::BDF, Arc<RTL8139>>> =
+    WithSpinLock::new(BTreeMap::new());
 
 /// Vendor ID of Realtek
 const RTL8139_VENDOR_ID: u16 = 0x10ec;
@@ -109,7 +113,11 @@ pub fn init<'a>(interrupt_mappings: &Vec<acpi::InterruptMapping>) -> usize {
                     }
                 }
             }
-            nics.push(rtl8139)
+            let bdf = rtl8139.pci.bdf;
+            nics.insert(bdf, rtl8139);
+            NETWORK_STACK
+                .lock()
+                .insert(bdf, Arc::new(Interface::new(bdf)));
         }
     }
     let mut s = sched::lock();
@@ -190,7 +198,7 @@ impl RTL8139 {
             ],
             next_tx_desc: AtomicU8::new(0),
             vector: 0x26, // We magically know that this vector is empty, for now.
-            pending_irqs: Semaphore::new(128),
+            pending_irqs: Semaphore::new(0, 128),
         };
         let rtl8139 = Arc::new(rtl8139);
 
@@ -210,7 +218,7 @@ impl RTL8139 {
             }
         };
 
-        // Init rx buffer
+        // Initialize rx buffer
         let rx_buf_virt_addr = rtl8139.rx_buf.lock().buf.as_ptr() as usize;
         let rx_buf_addr = mm::phys_addr(rx_buf_virt_addr);
         match rx_buf_addr {
@@ -218,7 +226,7 @@ impl RTL8139 {
             None => panic!("rtl8139: unmapped rx_buf: {:x}", rx_buf_virt_addr),
         }
 
-        // Init tx buffers
+        // Initialize tx buffers
         for i in 0..4 {
             let tx_buf_virt_addr = rtl8139.tx_bufs[i].lock().buf.as_ptr() as usize;
             let tx_buf_addr = mm::phys_addr(tx_buf_virt_addr);
@@ -326,7 +334,7 @@ impl RTL8139 {
         };
     }
 
-    fn id(&self) -> MACAddress {
+    pub fn id(&self) -> MACAddress {
         let mut mac = [0u8; 6];
         unsafe {
             for i in 0..6 {
@@ -390,12 +398,14 @@ impl RTL8139 {
                 cbr,
             );
 
-            match net::recv_frame(frame, self, self.id()) {
-                Ok(_) => {}
-                Err(e) => {
-                    writeln!(serial::Handle::new(), "{}\n", e);
-                }
-            }
+            let dev_net = {
+                NETWORK_STACK
+                    .lock()
+                    .get(&self.pci.bdf)
+                    .expect("Device network stack should have been initialized")
+                    .clone()
+            };
+            dev_net.recv_frame(frame);
 
             capr = {
                 let capr = capr + 4 + frame_size as usize;
@@ -426,8 +436,8 @@ pub extern "C" fn rtl8139_handler(vector: u64) {
         //         We are also not calling any blocking functions, so there is no risk of a deadlock.
         let nics = unsafe { NICS.lock() };
         nics.iter()
-            .filter(|n| n.vector == vector as u8)
-            .map(|n| n.clone())
+            .filter(|(_, n)| n.vector == vector as u8)
+            .map(|(_, n)| n.clone())
             .collect::<Vec<Arc<RTL8139>>>()
     };
     for n in nics.iter() {
@@ -438,7 +448,7 @@ pub extern "C" fn rtl8139_handler(vector: u64) {
         // SAFETY: Not confirmed to be safe yet. The same for all following port IO calls.
         unsafe { n.outw(REG_ISR, 0x05) }
         if status & 1 == 1 {
-            n.pending_irqs.try_release();
+            n.pending_irqs.try_signal();
         }
         if status & 4 == 4 {
             // Send complete
@@ -455,7 +465,7 @@ pub extern "C" fn rtl8139_handler(vector: u64) {
 pub fn rtl8139_bottom_half() {
     let mut nics = Vec::<Arc<RTL8139>>::new();
     {
-        for n in NICS.lock().iter() {
+        for (_, n) in NICS.lock().iter() {
             nics.push(n.clone());
         }
     }
