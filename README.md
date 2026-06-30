@@ -1,6 +1,6 @@
 # An Operating System in Rust
 
-> Now with Cow (paging, not the mooing kind)
+> Responding to arping
 
 ## Requirements
 
@@ -9,8 +9,7 @@
     - Linux host
       ```console
       % cd /path/to/an-os-in-rust
-      % rustup toolchain install nightly-2026-06-26-x86_64-unknown-linux-gnu
-      % rustup override set nightly-2026-06-26-x86_64-unknown-linux-gnu # This sets the toolchain for the an-os-in-rust directory.
+      % rustup toolchain install nightly-2026-06-26-x86_64-unknown-linux-gnu % rustup override set nightly-2026-06-26-x86_64-unknown-linux-gnu # This sets the toolchain for the an-os-in-rust directory.
       % rustup component add rust-src --toolchain nightly-2026-06-26-x86_64-unknown-linux-gnu  # This adds the `rust-src` component for the nightly toolchain
       ```
     - macOS host
@@ -52,11 +51,12 @@ The following will build both the bootloader and the kernel. Results will be fou
 4. Observe that it does nothing useful ;)
 5. If you use `arping` to broadcast an ARP request, the kernel will respond.
    ```console
-   % sudo arping -I tap0 -U -S 192.168.18.1  192.168.18.40 // Both source and destination IP address don't matter now.
-   ARPING 192.168.18.40
-   42 bytes from 52:54:00:12:34:56 (192.168.18.40): index=0 time=7.971 msec
-   42 bytes from 52:54:00:12:34:56 (192.168.18.40): index=1 time=4.276 msec
-   42 bytes from 52:54:00:12:34:56 (192.168.18.40): index=2 time=4.179 msec
-   42 bytes from 52:54:00:12:34:56 (192.168.18.40): index=3 time=5.585 msec
+   % sudo arping -I tap0 -U -S 192.168.16.1  192.168.16.40
+   ARPING 192.168.16.40
+   42 bytes from 52:54:00:12:34:56 (192.168.16.40): index=0 time=13.679 msec
+   42 bytes from 52:54:00:12:34:56 (192.168.16.40): index=1 time=7.824 msec
+   42 bytes from 52:54:00:12:34:56 (192.168.16.40): index=2 time=6.584 msec
+   42 bytes from 52:54:00:12:34:56 (192.168.16.40): index=3 time=4.954 msec
+   ...
    ...
    ```

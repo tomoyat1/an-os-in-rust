@@ -16,6 +16,7 @@ use core::sync::atomic::Ordering::{AcqRel, Acquire};
 
 pub mod arp;
 pub mod ethernet;
+use crate::net::arp::ARP;
 use ethernet::{EtherType, MACAddress};
 
 #[derive(Debug)]
@@ -109,9 +110,14 @@ impl Interface {
                 );
                 match frame.ethertype() {
                     EtherType::ARP => {
-                        let interface = { NICS.lock().get(&self.device).unwrap().clone() };
-                        let arp_writer = arp::reply_writer(frame.payload(), interface.id());
-                        interface.transmit(frame.dest(), [None; 2], EtherType::ARP, arp_writer);
+                        let request = ARP::from_bytes(&frame.payload());
+                        let target_protocol_address = request.target_protocol_address();
+                        let me: [u8; 4] = [192, 168, 16, 40];
+                        if target_protocol_address == me {
+                            let interface = { NICS.lock().get(&self.device).unwrap().clone() };
+                            let arp_writer = arp::reply_writer(frame.payload(), interface.id());
+                            interface.transmit(frame.dest(), [None; 2], EtherType::ARP, arp_writer);
+                        }
                         Ok(())
                     }
                     _ => Ok(()),
