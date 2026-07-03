@@ -19,7 +19,8 @@ impl<'a> BootData<'a> {
         let mm_sz = phys_boot_data.memory_map_len;
         let acpi_rsdp = ((phys_boot_data.acpi_rsdp as usize) + base) as *const c_void;
 
-        let mm_ptr = (phys_boot_data.memory_map_buf as usize + mm::KERNEL_BASE) as *const MemoryDescriptor;
+        let mm_ptr =
+            (phys_boot_data.memory_map_buf as usize + mm::KERNEL_BASE) as *const MemoryDescriptor;
         let mmap = slice_from_raw_parts(mm_ptr, mm_sz);
 
         Self {

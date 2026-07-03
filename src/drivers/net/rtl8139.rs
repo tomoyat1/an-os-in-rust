@@ -1,4 +1,4 @@
-use crate::arch::x86_64::interrupt::{register_handler, IOAPIC, LOCAL_APIC};
+use crate::arch::x86_64::interrupt::{IOAPIC, LOCAL_APIC, register_handler};
 use crate::arch::x86_64::{mm, port};
 use crate::drivers::pci::{BarNumber, PCIDevice};
 use crate::drivers::{acpi, pci};
@@ -289,23 +289,23 @@ impl RTL8139 {
     }
 
     unsafe fn outb(&self, offset: u16, data: u8) {
-        port::outb(self.ioaddr(offset), data)
+        unsafe { port::outb(self.ioaddr(offset), data) }
     }
 
     unsafe fn inb(&self, offset: u16) -> u8 {
-        port::inb(self.ioaddr(offset))
+        unsafe { port::inb(self.ioaddr(offset)) }
     }
 
     unsafe fn outw(&self, offset: u16, data: u16) {
-        port::outw(self.ioaddr(offset), data)
+        unsafe { port::outw(self.ioaddr(offset), data) }
     }
 
     unsafe fn inw(&self, offset: u16) -> u16 {
-        port::inw(self.ioaddr(offset))
+        unsafe { port::inw(self.ioaddr(offset)) }
     }
 
     unsafe fn outl(&self, offset: u16, data: u32) {
-        port::outl(self.ioaddr(offset), data)
+        unsafe { port::outl(self.ioaddr(offset), data) }
     }
 
     pub fn transmit(

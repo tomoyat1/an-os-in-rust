@@ -4,7 +4,7 @@ use core::ptr::null_mut;
 use crate::KERNEL_BASE;
 
 #[link(name = "boot")]
-extern "C" {
+unsafe extern "C" {
     // Don't use this for now
     static heap_bottom: usize;
 }

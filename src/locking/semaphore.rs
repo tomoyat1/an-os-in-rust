@@ -64,11 +64,7 @@ impl Semaphore {
             let ok = self
                 .count
                 .try_update(AcqRel, Acquire, |u| {
-                    if u < self.max {
-                        Some(u + 1)
-                    } else {
-                        None
-                    }
+                    if u < self.max { Some(u + 1) } else { None }
                 })
                 .is_ok();
             if ok {
@@ -87,11 +83,7 @@ impl Semaphore {
         if self
             .count
             .try_update(AcqRel, Acquire, |u| {
-                if u < self.max {
-                    Some(u + 1)
-                } else {
-                    None
-                }
+                if u < self.max { Some(u + 1) } else { None }
             })
             .is_err()
         {

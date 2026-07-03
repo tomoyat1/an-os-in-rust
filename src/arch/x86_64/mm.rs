@@ -11,14 +11,14 @@ use interface::Environment;
 use paging::physical;
 use uefi::table::boot::{MemoryDescriptor, MemoryType};
 use x86_64::paging::mapping::Mapper;
-use x86_64::paging::table::{PagingStruct, PagingStructEntry, PRESENT_FLAG, RW_FLAG};
+use x86_64::paging::table::{PRESENT_FLAG, PagingStruct, PagingStructEntry, RW_FLAG};
 use x86_64::paging::{
     MASK_20_0, MASK_29_0, MASK_29_21, MASK_38_30, MASK_47_30, MASK_47_39, MASK_51_12, MASK_51_21,
     MASK_51_30, PAGING_STRUCTURE_BASE,
 };
 use x86_64_bare_metal::X86_64BareMetal;
 
-extern "C" {
+unsafe extern "C" {
     #[link_name = "boot_pml4"]
     static mut KERNEL_PML4: [PagingStructEntry; 512];
 
@@ -192,24 +192,26 @@ fn exclude_ranges(
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn page_fault_handler(error_code: usize, virt_addr: usize) {
-    // TODO: support other page faults
-    if error_code & PRESENT_FLAG == 0 {
-        // TODO: on-demand paging
-        if virt_addr == 0 {
-            // TODO: SIGSEGV to userland, or kernel panic if kernel mode
-            asm!("cli; hlt");
+    unsafe {
+        // TODO: support other page faults
+        if error_code & PRESENT_FLAG == 0 {
+            // TODO: on-demand paging
+            if virt_addr == 0 {
+                // TODO: SIGSEGV to userland, or kernel panic if kernel mode
+                asm!("cli; hlt");
+                return;
+            }
+            MAPPER.lock().as_mut().unwrap().alloc_page_at(virt_addr);
             return;
         }
-        MAPPER.lock().as_mut().unwrap().alloc_page_at(virt_addr);
-        return;
+        if error_code & RW_FLAG == RW_FLAG {
+            MAPPER
+                .lock()
+                .as_mut()
+                .unwrap()
+                .cow(virt_addr as *mut u8, SCRATCH);
+            return;
+        }
+        asm!("cli; hlt");
     }
-    if error_code & RW_FLAG == RW_FLAG {
-        MAPPER
-            .lock()
-            .as_mut()
-            .unwrap()
-            .cow(virt_addr as *mut u8, SCRATCH);
-        return;
-    }
-    asm!("cli; hlt");
 }

@@ -2,7 +2,7 @@ use crate::arch::x86_64::hpet;
 use crate::arch::x86_64::interrupt::interrupts_enabled;
 use crate::arch::x86_64::mm::mapper;
 use crate::kernel::sched::SchedulerGuard;
-use crate::kernel::sched::{Scheduler, SCHED_LATENCY};
+use crate::kernel::sched::{SCHED_LATENCY, Scheduler};
 use crate::some_task;
 
 use alloc::alloc::alloc;
@@ -13,7 +13,7 @@ use core::alloc::Layout;
 use core::arch::asm;
 use core::cmp::Ordering;
 use core::fmt::Formatter;
-use core::mem::{size_of, ManuallyDrop};
+use core::mem::{ManuallyDrop, size_of};
 use core::{fmt, ptr};
 use interface::Environment;
 use x86_64::paging::table::PagingStruct;
@@ -23,7 +23,7 @@ pub const KERNEL_STACK_SIZE: usize = 0x2000;
 const TASK_STRUCT_MASK: usize = (KERNEL_STACK_SIZE - 1) ^ 0xffff_ffff_ffff_ffff;
 const ACTUAL_STACK_SIZE: usize = KERNEL_STACK_SIZE - size_of::<TaskInfo>();
 
-extern "C" {
+unsafe extern "C" {
     #[link_name = "boot_stack_top"]
     static mut boot_stack: Task;
 
@@ -316,13 +316,15 @@ impl From<TaskHandle> for usize {
 
 #[unsafe(no_mangle)]
 unsafe fn task_entry(task_id: usize, entry: fn(), scheduler: *mut ManuallyDrop<SchedulerGuard>) {
-    {
-        // Release the scheduler lock; its drop restores this task's interrupt state.
-        let mut scheduler = unsafe { ptr::read(scheduler) };
-        ManuallyDrop::drop(&mut scheduler);
-    }
+    unsafe {
+        {
+            // Release the scheduler lock; its drop restores this task's interrupt state.
+            let mut scheduler = unsafe { ptr::read(scheduler) };
+            ManuallyDrop::drop(&mut scheduler);
+        }
 
-    entry();
+        entry();
+    }
 }
 
 fn _current_task<'a>() -> &'a mut Task {

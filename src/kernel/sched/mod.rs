@@ -11,12 +11,12 @@ use core::ptr;
 
 mod task;
 pub(crate) use crate::some_task;
-pub(crate) use task::current_task;
 pub(crate) use task::TaskHandle;
+pub(crate) use task::current_task;
 
 const SCHED_LATENCY: u64 = 20_000_000; // 20 ms.
 
-extern "C" {
+unsafe extern "C" {
     fn _do_switch(
         from: *const task::Task,
         to: *const task::Task,

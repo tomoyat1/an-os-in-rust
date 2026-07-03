@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 
 use core::arch::asm;
-use core::mem::{offset_of, MaybeUninit};
+use core::mem::{MaybeUninit, offset_of};
 use core::ptr;
 
 use crate::arch::x86_64::interrupt;
@@ -136,16 +136,20 @@ impl HPET {
     //         Caller must ensure that `offset` is a 32-bit aligned offset that is mapped to
     //         an HPET register.
     unsafe fn inw(&self, offset: usize) -> u32 {
-        let addr = (self.base_address + offset) as *const u32;
-        ptr::read_volatile(addr)
+        unsafe {
+            let addr = (self.base_address + offset) as *const u32;
+            ptr::read_volatile(addr)
+        }
     }
     /// Read a 64-bit value from a memory mapped register.
     // Safety: The base address is read from ACPI tables and is a valid address.
     //         Caller must ensure that `offset` is a 64-bit aligned offset that is mapped to
     //         an HPET register.
     unsafe fn ing(&self, offset: usize) -> u64 {
-        let addr = (self.base_address + offset) as *const u64;
-        ptr::read_volatile(addr)
+        unsafe {
+            let addr = (self.base_address + offset) as *const u64;
+            ptr::read_volatile(addr)
+        }
     }
 
     /// Write a 32-bit value to a memory mapped register.
@@ -153,8 +157,10 @@ impl HPET {
     //         Caller must ensure that `offset` is a 32-bit aligned offset that is mapped to
     //         an HPET register.
     unsafe fn outw(&mut self, offset: usize, value: u32) {
-        let addr = (self.base_address + offset) as *mut u32;
-        ptr::write_volatile(addr, value);
+        unsafe {
+            let addr = (self.base_address + offset) as *mut u32;
+            ptr::write_volatile(addr, value);
+        }
     }
 
     /// Write a 64-bit value to a memory mapped register.
@@ -162,8 +168,10 @@ impl HPET {
     //         Caller must ensure that `offset` is a 64-bit aligned offset that is mapped to
     //         an HPET register.
     unsafe fn outg(&mut self, offset: usize, value: u64) {
-        let addr = (self.base_address + offset) as *mut u64;
-        ptr::write_volatile(addr, value);
+        unsafe {
+            let addr = (self.base_address + offset) as *mut u64;
+            ptr::write_volatile(addr, value);
+        }
     }
 }
 

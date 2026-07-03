@@ -1,7 +1,7 @@
 use alloc::vec;
 
 #[link(name = "pm")]
-extern "C" {
+unsafe extern "C" {
     fn reload_gdt(gdtr: *const GDTR);
 }
 

@@ -12,7 +12,7 @@ use crate::locking::spinlock::WithSpinLock;
 use crate::arch::x86_64::syscall;
 use crate::arch::x86_64::syscall::SYSCALL;
 
-extern "C" {
+unsafe extern "C" {
     fn page_fault_isr();
     fn general_protection_fault_isr();
     fn ps2_keyboard_isr();
@@ -23,7 +23,7 @@ extern "C" {
     fn reload_idt(idtr: *const IDTR);
 }
 
-extern "C" {
+unsafe extern "C" {
     static mut device_isr_entries: [[u8; 7]; 96];
 }
 

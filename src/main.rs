@@ -18,7 +18,7 @@ use core::panic::PanicInfo;
 
 mod arch;
 use arch::x86_64::interrupt;
-use arch::x86_64::mm::{init_mm, KERNEL_BASE, MMIO_BASE};
+use arch::x86_64::mm::{KERNEL_BASE, MMIO_BASE, init_mm};
 use arch::x86_64::pm;
 use arch::x86_64::{hpet, pit};
 
@@ -33,7 +33,7 @@ mod mm;
 
 mod kernel;
 use crate::kernel::clock;
-use crate::kernel::clock::{sleep, Clock};
+use crate::kernel::clock::{Clock, sleep};
 use crate::kernel::sched;
 
 mod locking;
@@ -45,81 +45,83 @@ mod net;
 /// # Arguments
 /// * `boot_data` - The address of the BootData struct provided from the bootloader.
 pub unsafe extern "C" fn start(boot_data: *mut bootlib::types::BootData) {
-    let mut boot_data = boot::BootData::relocate(boot_data, MMIO_BASE);
-    init_mm(boot_data.memory_map); // TODO: error handling
-    let madt = acpi::parse_madt(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
-    let gdt = pm::init();
+    unsafe {
+        let mut boot_data = boot::BootData::relocate(boot_data, MMIO_BASE);
+        init_mm(boot_data.memory_map); // TODO: error handling
+        let madt = acpi::parse_madt(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
+        let gdt = pm::init();
 
-    sched::init();
+        sched::init();
 
-    let lapic_id = interrupt::init(&madt);
+        let lapic_id = interrupt::init(&madt);
 
-    serial::init();
-    serial::tmp_write_com1(b"[OK]\tSerial console initialized\n");
+        serial::init();
+        serial::tmp_write_com1(b"[OK]\tSerial console initialized\n");
 
-    let mcfg = acpi::parse_mcfg(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
+        let mcfg = acpi::parse_mcfg(boot_data.acpi_rsdp).expect("failed to parse ACPI tables");
 
-    let hpet = acpi::parse_hpet(boot_data.acpi_rsdp);
-    let clock = match hpet {
-        Ok(hpet) => {
-            let hpet = hpet::init(hpet);
-            hpet::register_tick(clock::tick_fn());
-            clock::init(hpet);
-            hpet
+        let hpet = acpi::parse_hpet(boot_data.acpi_rsdp);
+        let clock = match hpet {
+            Ok(hpet) => {
+                let hpet = hpet::init(hpet);
+                hpet::register_tick(clock::tick_fn());
+                clock::init(hpet);
+                hpet
+            }
+            Err(_) => {
+                // pit::start();
+                // pit::register_tick(clock::tick_fn());
+                panic!("No supported clocksource found!")
+            }
+        };
+
+        // Initialize PCI devices
+        pci::init(lapic_id);
+        let nics = rtl8139::init(&madt.interrupt_mappings);
+        if nics == 1 {
+            serial::tmp_write_com1(b"[OK]\tRTL8139 NIC initialized\n");
+        } else {
+            serial::tmp_write_com1(b"[OK]\tNo NICs found\n")
         }
-        Err(_) => {
-            // pit::start();
-            // pit::register_tick(clock::tick_fn());
-            panic!("No supported clocksource found!")
+
+        // Initialize network stack
+        {
+            let mut scheduler = sched::lock();
+            scheduler.new_task(net::run);
         }
-    };
 
-    // Initialize PCI devices
-    pci::init(lapic_id);
-    let nics = rtl8139::init(&madt.interrupt_mappings);
-    if nics == 1 {
-        serial::tmp_write_com1(b"[OK]\tRTL8139 NIC initialized\n");
-    } else {
-        serial::tmp_write_com1(b"[OK]\tNo NICs found\n")
-    }
+        // Create several tasks to demonstrate switching.
+        {
+            let mut scheduler = sched::lock();
+            scheduler.new_task(some_task);
+        }
+        {
+            let mut scheduler = sched::lock();
+            scheduler.new_task(some_task);
+        }
+        {
+            let mut scheduler = sched::lock();
+            scheduler.new_task(some_task);
+        }
 
-    // Initialize network stack
-    {
-        let mut scheduler = sched::lock();
-        scheduler.new_task(net::run);
-    }
+        // Start kernel main loop, where we handle queued data from interrupts.
+        loop {
+            let current = sched::current_task();
+            writeln!(serial::Handle::new(), "Yo! from kernel main loop");
+            sleep(1000);
 
-    // Create several tasks to demonstrate switching.
-    {
-        let mut scheduler = sched::lock();
-        scheduler.new_task(some_task);
-    }
-    {
-        let mut scheduler = sched::lock();
-        scheduler.new_task(some_task);
-    }
-    {
-        let mut scheduler = sched::lock();
-        scheduler.new_task(some_task);
-    }
+            let ptr = 0x1000 as *mut u32;
+            *ptr = 0xdeadbeef;
+            let ptr = 0x2000 as *mut u32;
+            *ptr = 0xcafebabe;
 
-    // Start kernel main loop, where we handle queued data from interrupts.
-    loop {
-        let current = sched::current_task();
-        writeln!(serial::Handle::new(), "Yo! from kernel main loop");
-        sleep(1000);
-
-        let ptr = 0x1000 as *mut u32;
-        *ptr = 0xdeadbeef;
-        let ptr = 0x2000 as *mut u32;
-        *ptr = 0xcafebabe;
-
-        // We're done handling all unprocessed inputs/outputs. Switch to another task.
-        asm!(
-            "mov rax, 0x18",
-            "int 0x80",
-            out("rax") _,
-        );
+            // We're done handling all unprocessed inputs/outputs. Switch to another task.
+            asm!(
+                "mov rax, 0x18",
+                "int 0x80",
+                out("rax") _,
+            );
+        }
     }
 }
 

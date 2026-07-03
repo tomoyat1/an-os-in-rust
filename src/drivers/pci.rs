@@ -219,30 +219,35 @@ pub struct PCIDevice {
 
 impl PCIDevice {
     unsafe fn outl(&self, offset: u16, data: u32) {
-        let n_bus = self.bdf.bus_number as u32;
-        let n_device = self.bdf.device_number as u32;
-        let function: u32 = (self.bdf.function_number as u32 & 0b111) << 8;
-        let cfg_addr: u32 = 0x80000000 | n_bus << 16 | n_device << 11 | function | offset as u32;
+        unsafe {
+            let n_bus = self.bdf.bus_number as u32;
+            let n_device = self.bdf.device_number as u32;
+            let function: u32 = (self.bdf.function_number as u32 & 0b111) << 8;
+            let cfg_addr: u32 =
+                0x80000000 | n_bus << 16 | n_device << 11 | function | offset as u32;
 
-        // Set register to write to.
-        port::outl(CONFIG_ADDRESS, cfg_addr);
+            // Set register to write to.
+            port::outl(CONFIG_ADDRESS, cfg_addr);
 
-        // Actually write.
-        port::outl(CONFIG_DATA, data)
+            // Actually write.
+            port::outl(CONFIG_DATA, data)
+        }
     }
 
     unsafe fn inl(&self, offset: u16) -> u32 {
-        let n_bus = self.bdf.bus_number as u32;
-        let n_device = self.bdf.device_number as u32;
-        let function: u32 = (self.bdf.function_number as u32 & 0b111) << 8;
-        let cfg_addr: u32 =
-            0x80000000 | n_bus << 16 | n_device << 11 | function | (offset & 0xFC) as u32;
+        unsafe {
+            let n_bus = self.bdf.bus_number as u32;
+            let n_device = self.bdf.device_number as u32;
+            let function: u32 = (self.bdf.function_number as u32 & 0b111) << 8;
+            let cfg_addr: u32 =
+                0x80000000 | n_bus << 16 | n_device << 11 | function | (offset & 0xFC) as u32;
 
-        // Set register to write to.
-        port::outl(CONFIG_ADDRESS, cfg_addr);
+            // Set register to write to.
+            port::outl(CONFIG_ADDRESS, cfg_addr);
 
-        // Actually read.
-        port::inl(CONFIG_DATA)
+            // Actually read.
+            port::inl(CONFIG_DATA)
+        }
     }
 
     pub fn read_control_register(&self) -> u16 {
