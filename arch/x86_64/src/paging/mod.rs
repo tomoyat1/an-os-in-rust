@@ -27,22 +27,30 @@ enum PageSize {
     Gigantic,
 }
 
+impl PageSize {
+    pub fn order(&self) -> usize {
+        match self {
+            PageSize::Normal => 12,
+            PageSize::Huge => 21,
+            PageSize::Gigantic => 30,
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            PageSize::Normal => 0x1000,
+            PageSize::Huge => 0x200000,
+            PageSize::Gigantic => 0x40000000,
+        }
+    }
+}
+
 impl Display for PageSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             PageSize::Normal => write!(f, "4 KiB"),
             PageSize::Huge => write!(f, "2 MiB"),
             PageSize::Gigantic => write!(f, "1 GiB"),
-        }
-    }
-}
-
-impl Into<usize> for PageSize {
-    fn into(self) -> usize {
-        match self {
-            PageSize::Normal => 0x1000,
-            PageSize::Huge => 0x200000,
-            PageSize::Gigantic => 0x40000000,
         }
     }
 }

@@ -5,6 +5,7 @@ use core::fmt::{Debug, Display, Formatter};
 #[derive(Debug, PartialEq, Eq)]
 pub enum PagingError {
     MisalignedAddress(usize, PageSize),
+    OOM,
 }
 
 impl Display for PagingError {
@@ -13,6 +14,7 @@ impl Display for PagingError {
             PagingError::MisalignedAddress(addr, size) => {
                 write!(f, "misaligned address {:x} for page size: {}", addr, size)
             }
+            PagingError::OOM => write!(f, "out of memory"),
         }
     }
 }

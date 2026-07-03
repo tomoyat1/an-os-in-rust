@@ -18,6 +18,7 @@ mod test;
 
 const BOOT_PAGE_TABLE_COUNT: usize = 7;
 
+/// Represents a mapped physical page.
 struct MappedPage {
     phys_addr: usize,
     size: PageSize,
@@ -117,7 +118,7 @@ impl<E: Environment> Mapper<E> {
                             .aliasing_paging_structures
                             .insert(((*pml4).phys_addr::<E>(), virt_addr));
                     }
-                    // SAFETY: table_for_phys_addr and walk_to_leaf are pure reads of
+                    // SAFETY: table_for_phys_addr() and walk_to_leaf() are pure reads of
                     //         self.base and never touch self.mapped_pages, so the data behind
                     //         this pointer remains valid and unmodified through the loop.
                     let set_ptr =
@@ -193,13 +194,13 @@ impl<E: Environment> Mapper<E> {
                 .get_mut(&leaf.phys_addr)
                 .expect("Mapped pages should be in mapped_pages")
                 as *mut MappedPage;
-            // SAFETY: We either dereference the pointer and decrement the ref count or we remove
-            //         the MappedPage, but not both.
             let cr3 = unsafe {
                 let table = self.environment.paging_structure_base() as *mut PagingStruct;
                 (*table).phys_addr::<E>()
             };
 
+            // SAFETY: We either dereference the pointer and decrement the ref count or we remove
+            //         the MappedPage, but not both.
             unsafe {
                 if (*phys_page).refs.load(SeqCst) > 1 {
                     (*phys_page).refs.fetch_sub(1, SeqCst);
@@ -238,18 +239,34 @@ impl<E: Environment> Mapper<E> {
     }
 
     pub fn alloc_page_at(&mut self, virt_addr: usize) -> Result<(), PagingError> {
-        let phys_addr = self.page_allocator.allocate(12);
-        match phys_addr {
-            Some(phys_addr) => self.map(phys_addr.get_addr(), virt_addr),
-            None => {
-                panic!("No available physical pages!")
-            }
+        let block = self.page_allocator.allocate(PageSize::Normal.order());
+        match block {
+            Some(block) => self.map(block.addr(), virt_addr),
+            None => Err(PagingError::OOM),
         }
     }
 
-    pub fn map_mmio(&mut self, phys_addr: usize) {
+    pub fn alloc_block_at(&mut self, virt_addr: usize, order: usize) -> Result<(), PagingError> {
+        if order < PageSize::Normal.order() {
+            panic!("Cannot allocate block smaller than page size");
+        }
+        let block = self.page_allocator.allocate(order);
+        match block {
+            Some(block) => {
+                for p in 0..=order - PageSize::Normal.order() {
+                    let phys_addr = block.addr() + p * PageSize::Normal.size();
+                    let virt_addr = virt_addr + p * PageSize::Normal.size();
+                    self.map(phys_addr, virt_addr)?
+                }
+                Ok(())
+            }
+            None => Err(PagingError::OOM),
+        }
+    }
+
+    pub fn map_mmio(&mut self, phys_addr: usize) -> Result<(), PagingError> {
         let virt_addr = phys_addr + MMIO_BASE;
-        self.map(phys_addr, virt_addr);
+        self.map(phys_addr, virt_addr)
     }
 
     pub fn phys_addr(&self, virt_addr: usize) -> Option<usize> {
@@ -400,15 +417,17 @@ impl<E: Environment> Mapper<E> {
 
         self.unmap(virt_addr as usize)?;
         self.unmap(scratch as usize)?;
-        self.map(new_page.get_addr(), virt_addr as usize)
+        self.map(new_page.addr(), virt_addr as usize)
     }
 
     fn cow_tmp_map(&mut self, scratch: *mut u8) -> Block {
         let new_page = self
             .page_allocator
-            .allocate(12)
+            .allocate(PageSize::Normal.order())
             .expect("Physical memory exhausted!");
-        self.map(new_page.get_addr(), scratch as usize);
+        if let Err(err) = self.map(new_page.addr(), scratch as usize) {
+            panic!("Failed to map temporary page: {}", err);
+        };
         new_page
     }
 

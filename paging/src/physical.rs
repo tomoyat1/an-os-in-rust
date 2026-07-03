@@ -106,8 +106,12 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn get_addr(&self) -> usize {
+    pub fn addr(&self) -> usize {
         self.addr
+    }
+
+    pub fn order(&self) -> usize {
+        self.order
     }
 }
 
