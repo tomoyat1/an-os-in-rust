@@ -2,7 +2,7 @@
 name = "bootloader"
 version = "0.1.0"
 authors = ["tomoyat1 <t@tomoyat1.com>"]
-edition = "2018"
+edition = "2024"
 
 [[bin]]
 name = "bootx64"
