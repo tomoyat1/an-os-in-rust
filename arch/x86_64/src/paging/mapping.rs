@@ -1,9 +1,10 @@
 use super::*;
 use crate::paging::error::PagingError;
 use crate::paging::table::{
-    PagingLevel, PagingStruct, PagingStructEntry, ALL_FLAGS, PD, PDPT, PML4, PRESENT_FLAG, PS_FLAG,
-    PT, RW_FLAG,
+    ALL_FLAGS, PD, PDPT, PML4, PRESENT_FLAG, PS_FLAG, PT, PagingLevel, PagingStruct,
+    PagingStructEntry, RW_FLAG,
 };
+
 use alloc::collections::{BTreeMap, BTreeSet};
 use core::ptr;
 use core::ptr::write_bytes;
@@ -253,7 +254,7 @@ impl<E: Environment> Mapper<E> {
         let block = self.page_allocator.allocate(order);
         match block {
             Some(block) => {
-                for p in 0..=order - PageSize::Normal.order() {
+                for p in 0..1 << (order - PageSize::Normal.order()) {
                     let phys_addr = block.addr() + p * PageSize::Normal.size();
                     let virt_addr = virt_addr + p * PageSize::Normal.size();
                     self.map(phys_addr, virt_addr)?
