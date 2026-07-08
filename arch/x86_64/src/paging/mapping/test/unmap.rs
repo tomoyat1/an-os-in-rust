@@ -3,7 +3,8 @@ use paging_common::physical::PageAllocator;
 
 #[test]
 fn test_unmap() {
-    let allocator = PageAllocator::new();
+    let mut allocator = PageAllocator::new();
+    allocator.init(&[(0xb000, 0x4000)]);
     let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
     let fake_native = UserlandTest(base);
@@ -48,6 +49,12 @@ fn test_unmap() {
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
     }
 
+    let block = Arc::new(
+        mapper
+            .page_allocator
+            .allocate(PageSize::Normal.order())
+            .unwrap(),
+    );
     let mut aliases = BTreeSet::new();
     aliases.insert((pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
@@ -57,6 +64,7 @@ fn test_unmap() {
             size: PageSize::Normal,
             refs: AtomicUsize::new(1),
             aliasing_paging_structures: aliases,
+            block,
         },
     );
 
@@ -108,7 +116,8 @@ fn test_unmap() {
 
 #[test]
 fn test_unmap_userland_aliased() {
-    let allocator = PageAllocator::new();
+    let mut allocator = PageAllocator::new();
+    allocator.init(&[(0xb000, 0x4000)]);
     let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
     let fake_native = UserlandTest(base);
@@ -158,6 +167,13 @@ fn test_unmap_userland_aliased() {
         pte.set_addr(phys_addr & MASK_51_12);
         pte.set_flags(PRESENT_FLAG, true);
     }
+
+    let block = Arc::new(
+        mapper
+            .page_allocator
+            .allocate(PageSize::Normal.order())
+            .unwrap(),
+    );
     let mut aliasing_paging_structures = BTreeSet::new();
     aliasing_paging_structures.insert((other_pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
@@ -167,6 +183,7 @@ fn test_unmap_userland_aliased() {
             size: PageSize::Normal,
             refs: AtomicUsize::new(1),
             aliasing_paging_structures,
+            block,
         },
     );
 
@@ -253,7 +270,8 @@ fn test_unmap_userland_aliased() {
 
 #[test]
 fn test_unmap_misaligned() {
-    let allocator = PageAllocator::new();
+    let mut allocator = PageAllocator::new();
+    allocator.init(&[(0xb000, 0x4000)]);
     let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
     let fake_native = UserlandTest(base);
@@ -298,6 +316,12 @@ fn test_unmap_misaligned() {
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
     }
 
+    let block = Arc::new(
+        mapper
+            .page_allocator
+            .allocate(PageSize::Normal.order())
+            .unwrap(),
+    );
     let mut aliases = BTreeSet::new();
     aliases.insert((pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
@@ -307,6 +331,7 @@ fn test_unmap_misaligned() {
             size: PageSize::Normal,
             refs: AtomicUsize::new(1),
             aliasing_paging_structures: aliases,
+            block,
         },
     );
 
@@ -326,7 +351,8 @@ fn test_unmap_misaligned() {
 
 #[test]
 fn test_unmap_huge_misaligned() {
-    let allocator = PageAllocator::new();
+    let mut allocator = PageAllocator::new();
+    allocator.init(&[(0x10_0000, 0x4000)]);
     let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
     let fake_native = UserlandTest(base);
@@ -365,6 +391,12 @@ fn test_unmap_huge_misaligned() {
         pde.set_flags(PRESENT_FLAG | RW_FLAG | PS_FLAG, true);
     }
 
+    let block = Arc::new(
+        mapper
+            .page_allocator
+            .allocate(PageSize::Normal.order())
+            .unwrap(),
+    );
     let mut aliases = BTreeSet::new();
     aliases.insert((pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
@@ -374,6 +406,7 @@ fn test_unmap_huge_misaligned() {
             size: PageSize::Huge,
             refs: AtomicUsize::new(1),
             aliasing_paging_structures: aliases,
+            block,
         },
     );
 
@@ -393,7 +426,8 @@ fn test_unmap_huge_misaligned() {
 
 #[test]
 fn test_unmap_gigantic_misaligned() {
-    let allocator = PageAllocator::new();
+    let mut allocator = PageAllocator::new();
+    allocator.init(&[(0x4100_0000, 0x4000)]);
     let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
     let fake_native = UserlandTest(base);
@@ -426,6 +460,12 @@ fn test_unmap_gigantic_misaligned() {
         pdpte.set_flags(PRESENT_FLAG | RW_FLAG | PS_FLAG, true);
     }
 
+    let block = Arc::new(
+        mapper
+            .page_allocator
+            .allocate(PageSize::Normal.order())
+            .unwrap(),
+    );
     let mut aliases = BTreeSet::new();
     aliases.insert((pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
@@ -435,6 +475,7 @@ fn test_unmap_gigantic_misaligned() {
             size: PageSize::Gigantic,
             refs: AtomicUsize::new(1),
             aliasing_paging_structures: aliases,
+            block,
         },
     );
 

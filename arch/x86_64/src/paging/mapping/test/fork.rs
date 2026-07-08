@@ -3,7 +3,8 @@ use paging_common::physical::PageAllocator;
 
 #[test]
 fn test_fork() {
-    let allocator = PageAllocator::new();
+    let mut allocator = PageAllocator::new();
+    allocator.init(&[(0xb000usize, 0x1000)]);
     let layout = core::alloc::Layout::new::<[PagingStruct; PAGING_STRUCTURE_REGION_LEN]>();
     let base: *mut u8 = unsafe { alloc::alloc::alloc_zeroed(layout) };
     let fake_native = UserlandTest(base);
@@ -48,6 +49,12 @@ fn test_fork() {
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
     }
 
+    let block = Arc::new(
+        mapper
+            .page_allocator
+            .allocate(PageSize::Normal.order())
+            .unwrap(),
+    );
     let mut aliases = BTreeSet::new();
     aliases.insert((src_pml4 as usize, virt_addr));
     mapper.mapped_pages.insert(
@@ -57,6 +64,7 @@ fn test_fork() {
             size: PageSize::Normal,
             refs: AtomicUsize::new(1),
             aliasing_paging_structures: aliases,
+            block,
         },
     );
 

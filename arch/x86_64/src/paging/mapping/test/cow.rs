@@ -147,6 +147,18 @@ fn test_cow() {
         pte.set_addr(fake_src_page as usize);
         pte.set_flags(PRESENT_FLAG, true);
     }
+
+    // Re-initializing the page allocator screams tight coupling between the mapper and the
+    // page frame allocator, but we have to do this to get this test to run.
+    mapper
+        .page_allocator
+        .init(&[(fake_src_page as usize, 0x1000)]);
+    let block = Arc::new(
+        mapper
+            .page_allocator
+            .allocate(PageSize::Normal.order())
+            .unwrap(),
+    );
     let mut aliasing_paging_structures = BTreeSet::new();
     aliasing_paging_structures.insert((src_pml4 as usize, fake_src_page as usize));
     mapper.mapped_pages.insert(
@@ -156,6 +168,7 @@ fn test_cow() {
             size: PageSize::Normal,
             refs: AtomicUsize::new(1),
             aliasing_paging_structures,
+            block,
         },
     );
 

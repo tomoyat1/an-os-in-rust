@@ -6,6 +6,7 @@ use crate::paging::table::{
 };
 
 use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::sync::Arc;
 use core::ptr;
 use core::ptr::write_bytes;
 use core::sync::atomic::Ordering::SeqCst;
@@ -25,6 +26,7 @@ struct MappedPage {
     size: PageSize,
     refs: AtomicUsize,
     aliasing_paging_structures: BTreeSet<(usize, usize)>,
+    block: Arc<Block>,
 }
 
 struct LeafEntry {
@@ -38,6 +40,11 @@ impl<'a> From<&LeafEntry> for &'a mut PagingStructEntry {
     fn from(leaf: &LeafEntry) -> &'a mut PagingStructEntry {
         unsafe { (*leaf.table).get_entry_mut(leaf.idx) }
     }
+}
+
+enum MemoryType {
+    Conventional(Arc<Block>),
+    MMIO,
 }
 
 // TODO: make this a trait if we support architectures other than x86_64.
@@ -90,7 +97,12 @@ impl<E: Environment> Mapper<E> {
         }
     }
 
-    fn map(&mut self, phys_addr: usize, virt_addr: usize) -> Result<(), PagingError> {
+    fn map(
+        &mut self,
+        phys_addr: usize,
+        virt_addr: usize,
+        mem_type: MemoryType,
+    ) -> Result<(), PagingError> {
         // TODO: support mapping huge pages
         const MASK_11_0: usize = (1 << 12) - 1;
         if phys_addr & MASK_11_0 != 0 {
@@ -109,46 +121,51 @@ impl<E: Environment> Mapper<E> {
         pte.set_addr(phys_addr & MASK_51_12);
         pte.set_flags(PRESENT_FLAG | RW_FLAG, true);
 
-        if (virt_addr >> 51) == 0 {
-            let phys_page = self.mapped_pages.get_mut(&pte.get_addr());
-            match phys_page {
-                Some(phys_page) => {
-                    phys_page.refs.fetch_add(1, SeqCst);
-                    unsafe {
-                        phys_page
-                            .aliasing_paging_structures
-                            .insert(((*pml4).phys_addr::<E>(), virt_addr));
-                    }
-                    // SAFETY: table_for_phys_addr() and walk_to_leaf() are pure reads of
-                    //         self.base and never touch self.mapped_pages, so the data behind
-                    //         this pointer remains valid and unmodified through the loop.
-                    let set_ptr =
-                        &phys_page.aliasing_paging_structures as *const BTreeSet<(usize, usize)>;
-                    unsafe {
-                        for (aliasing, _) in (*set_ptr).iter() {
-                            let aliasing_pml4 = self.table_for_phys_addr(*aliasing);
-                            let leaf = self
-                                .walk_to_leaf(aliasing_pml4, virt_addr)
-                                .expect("Aliasing paging structures must map address");
-                            let entry: &mut PagingStructEntry = (&leaf).into();
-                            entry.set_flags(RW_FLAG, false)
+        if let MemoryType::Conventional(block) = mem_type {
+            // TODO: Track physical memory mapped to kernel space.
+            if (virt_addr >> 51) == 0 {
+                let phys_page = self.mapped_pages.get_mut(&pte.get_addr());
+                match phys_page {
+                    Some(phys_page) => {
+                        phys_page.refs.fetch_add(1, SeqCst);
+                        unsafe {
+                            phys_page
+                                .aliasing_paging_structures
+                                .insert(((*pml4).phys_addr::<E>(), virt_addr));
+                        }
+                        // SAFETY: table_for_phys_addr() and walk_to_leaf() are pure reads of
+                        //         self.base and never touch self.mapped_pages, so the data behind
+                        //         this pointer remains valid and unmodified through the loop.
+                        let set_ptr = &phys_page.aliasing_paging_structures
+                            as *const BTreeSet<(usize, usize)>;
+                        unsafe {
+                            for (aliasing, _) in (*set_ptr).iter() {
+                                let aliasing_pml4 = self.table_for_phys_addr(*aliasing);
+                                let leaf = self
+                                    .walk_to_leaf(aliasing_pml4, virt_addr)
+                                    .expect("Aliasing paging structures must map address");
+                                let entry: &mut PagingStructEntry = (&leaf).into();
+                                entry.set_flags(RW_FLAG, false)
+                            }
                         }
                     }
-                }
-                None => {
-                    let mut aliasing_paging_structures = BTreeSet::new();
-                    unsafe {
-                        aliasing_paging_structures.insert(((*pml4).phys_addr::<E>(), virt_addr));
-                    }
-                    self.mapped_pages.insert(
-                        phys_addr,
-                        MappedPage {
+                    None => {
+                        let mut aliasing_paging_structures = BTreeSet::new();
+                        unsafe {
+                            aliasing_paging_structures
+                                .insert(((*pml4).phys_addr::<E>(), virt_addr));
+                        }
+                        self.mapped_pages.insert(
                             phys_addr,
-                            size: PageSize::Normal,
-                            refs: AtomicUsize::new(1),
-                            aliasing_paging_structures,
-                        },
-                    );
+                            MappedPage {
+                                phys_addr,
+                                size: PageSize::Normal,
+                                refs: AtomicUsize::new(1),
+                                aliasing_paging_structures,
+                                block,
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -229,7 +246,13 @@ impl<E: Environment> Mapper<E> {
                         entry.set_flags(RW_FLAG, true);
                     }
                 } else {
-                    self.mapped_pages.remove(&leaf.phys_addr);
+                    let Some(phys_page) = self.mapped_pages.remove(&leaf.phys_addr) else {
+                        return Ok(());
+                    };
+                    let Some(block) = Arc::into_inner(phys_page.block) else {
+                        return Ok(());
+                    };
+                    self.page_allocator.free(block);
                 }
             }
         }
@@ -242,7 +265,11 @@ impl<E: Environment> Mapper<E> {
     pub fn alloc_page_at(&mut self, virt_addr: usize) -> Result<(), PagingError> {
         let block = self.page_allocator.allocate(PageSize::Normal.order());
         match block {
-            Some(block) => self.map(block.addr(), virt_addr),
+            Some(block) => self.map(
+                block.addr(),
+                virt_addr,
+                MemoryType::Conventional(Arc::new(block)),
+            ),
             None => Err(PagingError::OOM),
         }
     }
@@ -254,10 +281,15 @@ impl<E: Environment> Mapper<E> {
         let block = self.page_allocator.allocate(order);
         match block {
             Some(block) => {
+                let block = Arc::new(block);
                 for p in 0..1 << (order - PageSize::Normal.order()) {
                     let phys_addr = block.addr() + p * PageSize::Normal.size();
                     let virt_addr = virt_addr + p * PageSize::Normal.size();
-                    self.map(phys_addr, virt_addr)?
+                    self.map(
+                        phys_addr,
+                        virt_addr,
+                        MemoryType::Conventional(block.clone()),
+                    )?
                 }
                 Ok(())
             }
@@ -267,7 +299,7 @@ impl<E: Environment> Mapper<E> {
 
     pub fn map_mmio(&mut self, phys_addr: usize) -> Result<(), PagingError> {
         let virt_addr = phys_addr + MMIO_BASE;
-        self.map(phys_addr, virt_addr)
+        self.map(phys_addr, virt_addr, MemoryType::MMIO)
     }
 
     pub fn phys_addr(&self, virt_addr: usize) -> Option<usize> {
@@ -418,15 +450,24 @@ impl<E: Environment> Mapper<E> {
 
         self.unmap(virt_addr as usize)?;
         self.unmap(scratch as usize)?;
-        self.map(new_page.addr(), virt_addr as usize)
+        self.map(
+            new_page.addr(),
+            virt_addr as usize,
+            MemoryType::Conventional(new_page),
+        )
     }
 
-    fn cow_tmp_map(&mut self, scratch: *mut u8) -> Block {
+    fn cow_tmp_map(&mut self, scratch: *mut u8) -> Arc<Block> {
         let new_page = self
             .page_allocator
             .allocate(PageSize::Normal.order())
             .expect("Physical memory exhausted!");
-        if let Err(err) = self.map(new_page.addr(), scratch as usize) {
+        let new_page = Arc::new(new_page);
+        if let Err(err) = self.map(
+            new_page.addr(),
+            scratch as usize,
+            MemoryType::Conventional(new_page.clone()),
+        ) {
             panic!("Failed to map temporary page: {}", err);
         };
         new_page
